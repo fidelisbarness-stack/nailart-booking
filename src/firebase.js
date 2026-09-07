@@ -1,17 +1,21 @@
+// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
-// Ganti sesuai kunci kredensial dari Firebase Console milikmu nanti
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCxPyT1tugbLAIEOAnDWTulOEvpiFDkWBI",
+  authDomain: "livia-nailart-web.firebaseapp.com",
+  projectId: "livia-nailart-web",
+  storageBucket: "livia-nailart-web.firebasestorage.app",
+  messagingSenderId: "140963782247",
+  appId: "1:140963782247:web:192c69c3b2c5c442953ec2",
+  measurementId: "G-YHYL17XG3S"
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+const analytics = getAnalytics(app);
