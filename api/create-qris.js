@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { amount, name, email, orderId } = req.body;
+    const { amount, name, email, phoneNumber, orderId, productDetails } = req.body;
 
     // 1. Ambil Kunci Rahasia dari Environment Variables Vercel
     const merchantCode = process.env.DUITKU_MERCHANT_CODE;
@@ -27,13 +27,14 @@ export default async function handler(req, res) {
 
     // 3. Payload Request ke DuitKu
     const payload = {
-      merchantcode: merchantCode,
+      merchantCode,
       paymentAmount: paymentAmount,
       paymentMethod: 'SP', // Kode "SP" / "DQ" khusus untuk QRIS
       merchantOrderId: merchantOrderId,
-      productDetails: 'Pembayaran Treatment / Layanan',
+      productDetails: productDetails || 'Pembayaran Treatment / Layanan',
       customerVaName: name || 'Pelanggan Galeri',
       email: email || 'customer@gmail.com',
+      phoneNumber: phoneNumber || '',
       callbackUrl: `${process.env.APP_URL}/api/duitku-callback`,
       returnUrl: `${process.env.APP_URL}/?status=success`,
       signature: signature,
@@ -53,14 +54,18 @@ export default async function handler(req, res) {
       // Sukses membuat QRIS
       return res.status(200).json({
         success: true,
+        statusCode: '00',
         merchantOrderId: merchantOrderId,
         paymentUrl: data.paymentUrl, // URL Halaman QRIS DuitKu
         qrString: data.qrString || null,
-        reference: data.reference
+        reference: data.reference,
+        statusMessage: data.statusMessage || 'Berhasil membuat QRIS DuitKu'
       });
     } else {
       return res.status(400).json({
         success: false,
+        statusCode: data.statusCode || '99',
+        statusMessage: data.statusMessage || 'Gagal membuat QRIS DuitKu',
         message: data.statusMessage || 'Gagal membuat QRIS DuitKu'
       });
     }
