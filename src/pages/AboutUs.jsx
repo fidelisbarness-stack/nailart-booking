@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import logoImg from '../assets/logoImg.jpeg'; // Sesuaikan lokasi/path gambar logo kamu
 
 export default function AboutUs() {
   const WA_NUMBER = '6287827562925';
@@ -20,11 +21,23 @@ export default function AboutUs() {
 
         {/* TENTANG KAMI */}
         <div className="bg-white p-8 sm:p-10 rounded-3xl border border-brand-rose shadow-sm text-center max-w-3xl mx-auto space-y-5">
-          <span className="inline-block px-3.5 py-1 rounded-full bg-brand-rose text-brand-dark text-[10px] font-extrabold tracking-wider uppercase">
-            TENTANG KAMI
-          </span>
+          
+          {/* LOGO STUDIO */}
+          <div className="flex justify-center">
+            <img 
+              src={logoImg} 
+              alt="Vinail's Logo" 
+              className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border-2 border-brand-rose p-1 shadow-sm"
+            />
+          </div>
 
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-brand-dark">NailArt Studio</h2>
+          <div>
+            <span className="inline-block px-3.5 py-1 rounded-full bg-brand-rose text-brand-dark text-[10px] font-extrabold tracking-wider uppercase">
+              TENTANG KAMI
+            </span>
+          </div>
+
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-brand-dark">VINAIL'S NailArt Solo Baru</h2>
 
           <p className="text-brand-dark/80 text-xs sm:text-sm leading-relaxed max-w-xl mx-auto">
             Kami menghadirkan layanan perawatan kuku dan <span className="font-bold text-brand-ruby">custom nail art premium</span> dengan standar higienis tinggi. Didukung oleh <i>nail artist</i> berpengalaman untuk memberikan keindahan maksimal pada kukumu.
@@ -103,7 +116,7 @@ export default function AboutUs() {
             <div className="space-y-3 text-xs text-brand-dark">
               <div className="flex justify-between items-center py-1 border-b border-brand-rose/20">
                 <span className="font-medium text-brand-dark/70">Senin – Jumat</span>
-                <span className="font-bold text-brand-dark">10:00 – 20:00 WIB</span>
+                <span className="font-bold text-brand-dark">09:00 – 21:00 WIB</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-brand-rose/20">
                 <span className="font-medium text-brand-dark/70">Sabtu – Minggu</span>
@@ -120,11 +133,11 @@ export default function AboutUs() {
           <div className="bg-white p-6 rounded-2xl border border-brand-rose shadow-sm space-y-4">
             <div className="flex items-center gap-2 border-b border-brand-rose pb-3">
               <span className="text-lg">📍</span>
-              <h3 className="font-extrabold text-brand-dark text-sm">Lokasi Studio</h3>
+              <h3 className="font-extrabold text-brand-dark text-sm">Lokasi</h3>
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-bold text-brand-dark">VINAIL'S NAILART SOLO BARU</p>
+              <p className="text-xs font-bold text-brand-dark"></p>
               <div className="w-full h-40 rounded-xl overflow-hidden border border-brand-rose/60">
                 <iframe
                   title="Studio Location"

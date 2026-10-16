@@ -1,14 +1,17 @@
 import React, { useState, useMemo } from 'react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
+import { createDuitkuTransaction } from '../services/duitku';
 
 const DEFAULT_HOURS = [
-  '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', 
+  '09:00', '10:00', '11:00', '12:00', '13:00', 
   '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'
 ];
 
 export default function Booking({ bookings = [], setBookings, globalSlots, setGlobalSlots }) {
   const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
 
-  // FX: Generate 7 Hari Bergulir Otomatis dari Hari Ini
   const datesList = useMemo(() => {
     const list = [];
     const today = new Date();
@@ -16,7 +19,6 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
     for (let i = 0; i < 7; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
-
       const dateVal = d.toISOString().split('T')[0];
 
       let label = d.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -28,7 +30,6 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
     return list;
   }, []);
 
-  // Data Pilihan Layanan
   const services = [
     { id: 1, name: 'Gel Polish Single Color', price: 120000, duration: '60 Menit' },
     { id: 2, name: 'Nail Art Custom Full Set', price: 250000, duration: '90 Menit' },
@@ -37,17 +38,29 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
 
   const DP_AMOUNT = 50000;
 
-  // State Form
   const [customerName, setCustomerName] = useState('');
   const [customerWa, setCustomerWa] = useState('');
+  const [customerIg, setCustomerIg] = useState('');
   
   const [selectedDate, setSelectedDate] = useState(datesList[0].value);
   const [selectedTime, setSelectedTime] = useState(null);
   const [selectedService, setSelectedService] = useState(services[0]);
-  
   const [lastBookingId, setLastBookingId] = useState('');
 
-  // Ambil slot sesuai tanggal yang dipilih
+  const handleNameChange = (e) => {
+    const value = e.target.value;
+    if (/^[a-zA-Z\s]*$/.test(value)) {
+      setCustomerName(value);
+    }
+  };
+
+  const handleWaChange = (e) => {
+    const value = e.target.value;
+    if (/^\d*$/.test(value)) {
+      setCustomerWa(value);
+    }
+  };
+
   const activeSlots = useMemo(() => {
     if (globalSlots && globalSlots[selectedDate]) {
       return globalSlots[selectedDate];
@@ -61,13 +74,18 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
     }));
   }, [globalSlots, selectedDate]);
 
-  // Validasi Step 1 -> Step 2
   const handleNextStep = (e) => {
     e.preventDefault();
-    if (!customerName.trim() || !customerWa.trim()) {
-      alert('Silakan isi Nama Lengkap dan Nomor WhatsApp terlebih dahulu!');
+
+    if (!customerName.trim()) {
+      alert('Nama Lengkap wajib diisi (hanya huruf)!');
       return;
     }
+    if (!customerWa.trim()) {
+      alert('Nomor WhatsApp wajib diisi (hanya angka)!');
+      return;
+    }
+
     setStep(2);
   };
 
@@ -76,8 +94,7 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
     setSelectedTime(slot.time);
   };
 
-  // Submit Final Booking
-  const handleSubmitBooking = (e) => {
+  const handleSubmitBooking = async (e) => {
     e.preventDefault();
 
     if (!selectedTime) {
@@ -85,59 +102,88 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
       return;
     }
 
-    const generatedId = `TIX-DP-${Math.floor(100000 + Math.random() * 900000)}`;
-    const remainingPay = Math.max(0, selectedService.price - DP_AMOUNT);
+    setLoading(true);
 
-    const newBooking = {
-      id: generatedId,
-      customerName,
-      customerWa,
-      serviceName: selectedService.name,
-      totalPrice: selectedService.price,
-      dpPaid: DP_AMOUNT,
-      remainingPayment: remainingPay,
-      date: selectedDate,
-      time: selectedTime,
-      status: 'DP Paid (Confirmed)',
-      paymentMethod: 'QRIS (Duitku)',
-    };
+    try {
+      const generatedId = `TIX-DP-${Math.floor(100000 + Math.random() * 900000)}`;
+      const remainingPay = Math.max(0, selectedService.price - DP_AMOUNT);
+      const formattedIg = customerIg ? (customerIg.startsWith('@') ? customerIg : `@${customerIg}`) : '-';
 
-    if (setBookings) {
-      setBookings([newBooking, ...bookings]);
-    }
+      const newBooking = {
+        id: generatedId,
+        customerName,
+        customerWa,
+        customerIg: formattedIg,
+        serviceName: selectedService.name,
+        totalPrice: selectedService.price,
+        dpPaid: DP_AMOUNT,
+        remainingPayment: remainingPay,
+        date: selectedDate,
+        time: selectedTime,
+        status: 'DP Paid (Confirmed)', 
+        paymentMethod: 'QRIS (Duitku)',
+      };
 
-    // Kurangi ketersediaan slot jam pada tanggal yang dipilih
-    if (setGlobalSlots) {
-      setGlobalSlots((prevSlots = {}) => {
-        const currentSlotsForDate = prevSlots[selectedDate] || activeSlots;
-        const updatedSlotsForDate = currentSlotsForDate.map((slot) => {
-          if (slot.time === selectedTime) {
-            const nextLeft = Math.max(0, (slot.slotsLeft ?? 1) - 1);
-            return {
-              ...slot,
-              slotsLeft: nextLeft,
-              status: nextLeft === 0 ? 'full' : 'available',
-            };
+      const duitkuRes = await createDuitkuTransaction(newBooking);
+console.log('Duitku Response:', duitkuRes);
+      if (duitkuRes && duitkuRes.statusCode === '00') {
+        window.checkout.process(duitkuRes.reference, {
+          successEvent: async function(result) {
+            newBooking.createdAt = serverTimestamp();
+            await addDoc(collection(db, 'bookings'), newBooking);
+
+            if (setGlobalSlots) {
+              setGlobalSlots((prev) => {
+                const updated = (prev[selectedDate] || activeSlots).map((slot) => {
+                  if (slot.time === selectedTime) {
+                    const nextLeft = Math.max(0, (slot.slotsLeft ?? 1) - 1);
+                    return { ...slot, slotsLeft: nextLeft, status: nextLeft === 0 ? 'full' : 'available' };
+                  }
+                  return slot;
+                });
+                return { ...prev, [selectedDate]: updated };
+              });
+            }
+
+            setLastBookingId(generatedId);
+            setStep(3);
+            setLoading(false);
+
+            const WA_NUMBER = '6287827562925'; 
+            const waText = `Halo Admin Vinail's!\nSaya baru saja MENYELESAIKAN pembayaran DP Rp 50.000 via QRIS.\n\n*ID Booking:* ${generatedId}\n*Nama:* ${customerName}\n*Jadwal:* ${selectedDate} (Jam ${selectedTime})\n*Layanan:* ${selectedService.name}\n*Sisa Pelunasan di Studio:* Rp ${remainingPay.toLocaleString('id-ID')}\n\nMohon konfirmasi jadwalnya ya kak, terima kasih!`;
+
+            window.open(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(waText)}`, '_blank');
+          },
+          pendingEvent: function(result) {
+            alert('Pembayaran masih diproses.');
+            setLoading(false);
+          },
+          errorEvent: function(result) {
+            alert('Terjadi kesalahan pada sistem pembayaran.');
+            setLoading(false);
+          },
+          closeEvent: function(result) {
+            alert('Anda membatalkan pembayaran. Data booking belum disimpan.');
+            setLoading(false); 
           }
-          return slot;
         });
 
-        return {
-          ...prevSlots,
-          [selectedDate]: updatedSlotsForDate,
-        };
-      });
+      } else {
+        alert(`Gagal membuat link Duitku: ${duitkuRes?.statusMessage}`);
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Terjadi kesalahan jaringan.');
+      setLoading(false);
     }
-
-    setLastBookingId(generatedId);
-    setStep(3);
   };
 
   const remainingBalance = Math.max(0, selectedService.price - DP_AMOUNT);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
-      {/* Indicator Stepper */}
+      
       {step !== 3 && (
         <div className="bg-white p-4 rounded-3xl border border-[#F5C6CB] shadow-sm flex items-center justify-between text-xs font-bold">
           <div className={`flex items-center gap-2 ${step >= 1 ? 'text-[#550B18]' : 'text-gray-400'}`}>
@@ -158,7 +204,6 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
         </div>
       )}
 
-      {/* STEP 1: FORM BIODATA */}
       {step === 1 && (
         <form onSubmit={handleNextStep} className="bg-white p-6 md:p-8 rounded-3xl border border-[#F5C6CB] shadow-md space-y-6">
           <div className="border-b border-gray-100 pb-4">
@@ -174,7 +219,7 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
                 required
                 placeholder="Contoh: Anisa Maharani"
                 value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
+                onChange={handleNameChange}
                 className="w-full p-3.5 border border-gray-300 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#550B18]"
               />
             </div>
@@ -186,7 +231,7 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
                 required
                 placeholder="Contoh: 081234567890"
                 value={customerWa}
-                onChange={(e) => setCustomerWa(e.target.value)}
+                onChange={handleWaChange}
                 className="w-full p-3.5 border border-gray-300 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#550B18]"
               />
             </div>
@@ -202,13 +247,14 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
         </form>
       )}
 
-      {/* STEP 2: PILIH TANGGAL, JAM, LAYANAN, & DP */}
       {step === 2 && (
         <form onSubmit={handleSubmitBooking} className="space-y-6">
           <div className="bg-[#FFF9F6] p-4 rounded-2xl border border-[#F5C6CB] flex justify-between items-center">
             <div>
               <p className="text-[10px] text-gray-500 uppercase font-bold">Pemesan</p>
-              <p className="font-extrabold text-sm text-[#550B18]">{customerName} ({customerWa})</p>
+              <p className="font-extrabold text-sm text-[#550B18]">
+                {customerName} ({customerWa}{customerIg ? ` | ${customerIg.startsWith('@') ? customerIg : `@${customerIg}`}` : ''})
+              </p>
             </div>
             <button type="button" onClick={() => setStep(1)} className="text-xs text-[#550B18] underline font-bold">
               Ubah Data
@@ -216,10 +262,9 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
           </div>
 
           <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#F5C6CB] shadow-md space-y-6">
-            {/* A. Pilih Tanggal (7 Hari Bergulir) */}
             <div>
               <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">
-                1. Pilih Tanggal (7 Hari Ke Depan)
+                1. Pilih Tanggal 
               </label>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {datesList.map((d) => (
@@ -242,7 +287,6 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
               </div>
             </div>
 
-            {/* B. Pilih Jam Operasional (08:00 - 21:00) */}
             <div>
               <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">
                 2. Pilih Jam Operasional (08:00 - 21:00)
@@ -276,7 +320,6 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
               </div>
             </div>
 
-            {/* C. Pilih Jenis Perawatan */}
             <div>
               <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">
                 3. Pilih Jenis Perawatan
@@ -304,7 +347,6 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
               </div>
             </div>
 
-            {/* D. Metode Pembayaran & Rincian DP */}
             <div>
               <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">
                 4. Metode Pembayaran Wajib
@@ -313,7 +355,7 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">📱</span>
                   <div>
-                    <h5 className="font-extrabold text-xs text-[#550B18]">QRIS Instant (via Duitku)</h5>
+                    <h5 className="font-extrabold text-xs text-[#550B18]">QRIS Duitku</h5>
                     <p className="text-[10px] text-gray-500">GoPay, ShopeePay, BCA, Mandiri, dll.</p>
                   </div>
                 </div>
@@ -323,18 +365,17 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
               </div>
             </div>
 
-            {/* Ringkasan Biaya */}
             <div className="border-t border-dashed border-gray-300 pt-4 space-y-2 text-xs">
               <div className="flex justify-between text-gray-600">
-                <span>Total Harga Layanan ({selectedService.name})</span>
+                <span>Total Harga ({selectedService.name})</span>
                 <span>Rp {selectedService.price.toLocaleString('id-ID')}</span>
               </div>
               <div className="flex justify-between text-[#550B18] font-bold">
-                <span>DP Wajib Dibatarkan Sekarang (QRIS)</span>
+                <span>DP Wajib Dibayarkan Sekarang (QRIS)</span>
                 <span>Rp {DP_AMOUNT.toLocaleString('id-ID')}</span>
               </div>
               <div className="flex justify-between text-gray-500">
-                <span>Sisa Pelunasan di Studio (Cash/EDC)</span>
+                <span>Sisa Pelunasan di Studio</span>
                 <span>Rp {remainingBalance.toLocaleString('id-ID')}</span>
               </div>
             </div>
@@ -343,41 +384,39 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
           <div className="flex gap-3">
             <button
               type="button"
+              disabled={loading}
               onClick={() => setStep(1)}
-              className="w-1/3 py-4 rounded-2xl border border-gray-300 font-bold text-sm text-gray-700"
+              className="w-1/3 py-4 rounded-2xl border border-gray-300 font-bold text-sm text-gray-700 hover:bg-gray-50 transition-all"
             >
               Kembali
             </button>
             <button
               type="submit"
-              className="w-2/3 bg-[#550B18] text-white py-4 rounded-2xl font-black text-sm hover:bg-[#3d0711] transition-all shadow-lg"
+              disabled={loading}
+              className="w-2/3 bg-[#550B18] text-white py-4 rounded-2xl font-black text-sm hover:bg-[#3d0711] transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              Bayar DP Rp 50.000 via QRIS
+              {loading ? (
+                <span>Memproses Duitku...</span>
+              ) : (
+                <span>Bayar DP Rp 50.000 via QRIS</span>
+              )}
             </button>
           </div>
         </form>
       )}
 
-      {/* STEP 3: E-TIKET & PROSES BAYAR */}
       {step === 3 && (
         <div className="bg-white rounded-3xl border border-[#F5C6CB] shadow-xl overflow-hidden space-y-6">
           <div className="bg-[#550B18] text-white p-6 text-center space-y-2">
-            <div className="text-4xl">QRIS</div>
-            <h2 className="text-xl font-black">BAYAR DP RESERVASI</h2>
+            <div className="text-4xl">🎉</div>
+            <h2 className="text-xl font-black">MEMPROSES PEMBAYARAN</h2>
             <p className="text-xs text-[#F5C6CB]">Kode Booking: <strong>{lastBookingId}</strong></p>
           </div>
 
           <div className="p-6 space-y-4 text-xs text-center">
-            <div className="bg-gray-100 p-6 rounded-2xl max-w-xs mx-auto border-2 border-dashed border-gray-300">
-              <div className="w-48 h-48 bg-white mx-auto flex items-center justify-center rounded-xl border">
-                <span className="text-gray-400 font-bold text-center p-2">
-                  [ SIMULASI QRIS DUITKU ]<br/>
-                  Scan untuk Bayar Rp 50.000
-                </span>
-              </div>
-              <p className="text-[10px] text-gray-500 mt-3">
-                Integrasi Gateway Duitku dapat memuat QR Code otomatis lewat API Response.
-              </p>
+            <div className="bg-green-50 text-green-800 p-4 rounded-2xl border border-green-200 font-semibold">
+              <p>Halaman pembayaran Duitku dan WhatsApp telah dibuka.</p>
+              <p className="text-[11px] mt-1 text-green-700">Jika WhatsApp tidak terbuka otomatis, silakan konfirmasi manual ke Admin.</p>
             </div>
 
             <div className="text-left bg-[#FFF9F6] p-4 rounded-2xl space-y-2 border border-[#F5C6CB]">
@@ -386,16 +425,16 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
                 <span className="font-bold text-[#550B18]">{customerName}</span>
               </div>
               <div className="flex justify-between">
+                <span className="text-gray-500">WA & IG:</span>
+                <span className="font-bold text-[#550B18]">{customerWa} {customerIg ? `| ${customerIg.startsWith('@') ? customerIg : `@${customerIg}`}` : ''}</span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-gray-500">Tanggal & Jam:</span>
                 <span className="font-bold text-[#550B18]">{selectedDate} @ {selectedTime} WIB</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Tagihan DP:</span>
                 <span className="font-black text-[#550B18]">Rp {DP_AMOUNT.toLocaleString('id-ID')}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Sisa Bayar di Studio:</span>
-                <span className="font-bold text-gray-700">Rp {remainingBalance.toLocaleString('id-ID')}</span>
               </div>
             </div>
           </div>
@@ -406,9 +445,10 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
                 setStep(1);
                 setCustomerName('');
                 setCustomerWa('');
+                setCustomerIg('');
                 setSelectedTime(null);
               }}
-              className="bg-[#550B18] text-white px-6 py-3 rounded-2xl font-bold text-xs"
+              className="bg-[#550B18] text-white px-6 py-3 rounded-2xl font-bold text-xs hover:bg-[#3d0711] transition-all"
             >
               Selesai / Booking Baru
             </button>

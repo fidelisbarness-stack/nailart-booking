@@ -57,15 +57,40 @@ export default function App() {
     { time: '21:00', slotsLeft: 1, status: 'available', isBlocked: false, reason: '' },
   ]);
 
+  // Handler Buka Modal Admin
+  const handleOpenAdminModal = () => {
+    setPinInput('');
+    setPinError('');
+    setShowAdminModal(true);
+  };
+
+  // Handler Batal / Tutup Modal Admin
+  const handleCloseAdminModal = () => {
+    setPinInput('');
+    setPinError('');
+    setShowAdminModal(false);
+  };
+
+  // Handler Logout Admin
+  const handleLogoutAdmin = () => {
+    setIsAdmin(false);
+    setPinInput('');
+    setPinError('');
+    setActivePage('booking');
+  };
+
+  // Handler Verifikasi PIN
   const handleVerifyPin = (e) => {
     e.preventDefault();
     if (pinInput === '1234') {
       setIsAdmin(true);
       setShowAdminModal(false);
+      setPinInput('');
       setPinError('');
       setActivePage('admin');
     } else {
       setPinError('PIN Admin Salah! (Petunjuk: 1234)');
+      setPinInput(''); // Reset input saat salah
     }
   };
 
@@ -83,7 +108,7 @@ export default function App() {
             Panel Admin
           </button>
           <button 
-            onClick={() => { setIsAdmin(false); setActivePage('booking'); }}
+            onClick={handleLogoutAdmin}
             className="bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-0.5 rounded-full text-[10px] uppercase font-extrabold transition-colors"
           >
             Keluar Mode
@@ -96,7 +121,7 @@ export default function App() {
         activePage={activePage} 
         setActivePage={setActivePage} 
         isAdmin={isAdmin}
-        onOpenAdminModal={() => setShowAdminModal(true)}
+        onOpenAdminModal={handleOpenAdminModal}
       />
 
       {/* Routing Halaman */}
@@ -142,6 +167,7 @@ export default function App() {
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
                 placeholder="****"
+                autoComplete="off"
                 className="w-full text-center text-2xl tracking-widest py-3 border border-[#F5C6CB] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#550B18]"
                 autoFocus
               />
@@ -150,7 +176,7 @@ export default function App() {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAdminModal(false)}
+                  onClick={handleCloseAdminModal}
                   className="flex-1 py-3 rounded-2xl border border-gray-300 text-gray-700 font-bold hover:bg-gray-100 transition-all text-sm"
                 >
                   Batal

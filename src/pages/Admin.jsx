@@ -1,14 +1,27 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { db } from '../firebase';
+import { 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  deleteDoc, 
+  doc, 
+  updateDoc, 
+  setDoc,
+  query, 
+  orderBy, 
+  serverTimestamp 
+} from 'firebase/firestore';
 
 const DEFAULT_HOURS = [
-  '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', 
+  '09:00', '10:00', '11:00', '12:00', '13:00', 
   '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'
 ];
 
 export default function Admin({ globalSlots, setGlobalSlots }) {
   const [activeAdminTab, setActiveAdminTab] = useState('schedules');
 
-  // Generator 7 Hari Bergulir Otomatis
+  // 1. GENERATOR 7 HARI BERGULIR OTOMATIS
   const datesList = useMemo(() => {
     const list = [];
     const today = new Date();
@@ -31,30 +44,62 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
   const [selectedSlotForReason, setSelectedSlotForReason] = useState(null);
   const [blockReasonInput, setBlockReasonInput] = useState('');
 
-  // STATE ULASAN (CRUD)
-  const [reviews, setReviews] = useState([
-    {
-      id: 1,
-      clientName: 'Siti Rahma',
-      treatment: 'Basic Manicure + Gel Polish',
-      reviewText: 'Pengerjaannya rapi banget, kuku kelihatan makin cantik dan gampang dikonsultasikan!',
-    },
-    {
-      id: 2,
-      clientName: 'Clarissa',
-      treatment: 'Custom Nail Art (3D Design)',
-      reviewText: 'Sesuai persis sama gambar contoh yang aku kirim di WhatsApp. Recommended!',
-    }
-  ]);
+  // 2. STATE REAL-TIME FIRESTORE (ULASAN & HISTORY)
+  const [reviews, setReviews] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [loadingReviews, setLoadingReviews] = useState(true);
 
+  // Form State Ulasan
   const [reviewForm, setReviewForm] = useState({
-    id: null,
     clientName: '',
     treatment: 'Basic Manicure + Gel Polish',
+    rating: 5,
     reviewText: '',
   });
-
+  const [uploadedImage, setUploadedImage] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [editingId, setEditingId] = useState(null);
+
+  // 3. LISTENERS FIRESTORE (REAL-TIME SUBSCRIPTIONS)
+  useEffect(() => {
+    // A. Sync Ulasan dari Firestore ('reviews')
+    const qReviews = query(collection(db, 'reviews'), orderBy('createdAt', 'desc'));
+    const unsubscribeReviews = onSnapshot(qReviews, (snapshot) => {
+      const data = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }));
+      setReviews(data);
+      setLoadingReviews(false);
+    }, (error) => console.error('Error fetching reviews:', error));
+
+    // B. Sync Schedule/Slots dari Firestore ('schedules')
+    const unsubscribeSchedules = onSnapshot(collection(db, 'schedules'), (snapshot) => {
+      const slotsData = {};
+      snapshot.docs.forEach((docSnap) => {
+        slotsData[docSnap.id] = docSnap.data().slots;
+      });
+      if (setGlobalSlots) {
+        setGlobalSlots((prev) => ({ ...prev, ...slotsData }));
+      }
+    }, (error) => console.error('Error fetching schedules:', error));
+
+    // C. Sync History Booking dari Firestore ('bookings')
+    const qBookings = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
+    const unsubscribeBookings = onSnapshot(qBookings, (snapshot) => {
+      const data = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }));
+      setBookings(data);
+    }, (error) => console.error('Error fetching bookings:', error));
+
+    return () => {
+      unsubscribeReviews();
+      unsubscribeSchedules();
+      unsubscribeBookings();
+    };
+  }, [setGlobalSlots]);
 
   // Slot dinamis terikat pada tanggal terpilih
   const currentSlots = useMemo(() => {
@@ -70,8 +115,8 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
     }));
   }, [globalSlots, selectedAdminDate]);
 
-  // Block slot spesifik
-  const handleBlockSlotWithReason = (e) => {
+  // 4. HANDLER SLOT JAM (FIRESTORE)
+  const handleBlockSlotWithReason = async (e) => {
     e.preventDefault();
     const updatedSlotsForDate = currentSlots.map((s) =>
       s.time === selectedSlotForReason
@@ -79,77 +124,151 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
         : s
     );
 
-    if (setGlobalSlots) {
-      setGlobalSlots((prev = {}) => ({
-        ...prev,
-        [selectedAdminDate]: updatedSlotsForDate
-      }));
+    try {
+      await setDoc(doc(db, 'schedules', selectedAdminDate), {
+        slots: updatedSlotsForDate
+      }, { merge: true });
+
+      if (setGlobalSlots) {
+        setGlobalSlots((prev = {}) => ({
+          ...prev,
+          [selectedAdminDate]: updatedSlotsForDate
+        }));
+      }
+    } catch (error) {
+      alert('Gagal memblokir jam: ' + error.message);
     }
 
     setSelectedSlotForReason(null);
     setBlockReasonInput('');
   };
 
-  // Unblock slot spesifik
-  const handleUnblockSlot = (time) => {
+  const handleUnblockSlot = async (time) => {
     const updatedSlotsForDate = currentSlots.map((s) =>
       s.time === time
         ? { ...s, isBlocked: false, reason: '' }
         : s
     );
 
-    if (setGlobalSlots) {
-      setGlobalSlots((prev = {}) => ({
-        ...prev,
-        [selectedAdminDate]: updatedSlotsForDate
-      }));
+    try {
+      await setDoc(doc(db, 'schedules', selectedAdminDate), {
+        slots: updatedSlotsForDate
+      }, { merge: true });
+
+      if (setGlobalSlots) {
+        setGlobalSlots((prev = {}) => ({
+          ...prev,
+          [selectedAdminDate]: updatedSlotsForDate
+        }));
+      }
+    } catch (error) {
+      alert('Gagal membuka jam: ' + error.message);
     }
   };
 
-  // HANDLER ULASAN (TAMBAH / EDIT / HAPUS)
-  const handleSubmitReview = (e) => {
+  // 5. HANDLER DRAG & DROP FOTO
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      processFile(e.target.files[0]);
+    }
+  };
+
+  const processFile = (file) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Mohon unggah file berupa gambar!');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      setUploadedImage(uploadEvent.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // 6. HANDLER ULASAN (FIRESTORE CRUD)
+  const handleSubmitReview = async (e) => {
     e.preventDefault();
     if (!reviewForm.clientName.trim() || !reviewForm.reviewText.trim()) {
       alert('Nama pelanggan dan ulasan tidak boleh kosong!');
       return;
     }
 
-    if (editingId) {
-      // Modus Update
-      setReviews((prev) =>
-        prev.map((item) => (item.id === editingId ? { ...reviewForm, id: editingId } : item))
-      );
-      setEditingId(null);
-    } else {
-      // Modus Tambah Baru
-      const newReview = {
-        ...reviewForm,
-        id: Date.now(),
-      };
-      setReviews([newReview, ...reviews]);
-    }
+    try {
+      if (editingId) {
+        // Mode Update
+        const docRef = doc(db, 'reviews', editingId);
+        await updateDoc(docRef, {
+          name: reviewForm.clientName,
+          service: reviewForm.treatment,
+          rating: Number(reviewForm.rating || 5),
+          comment: reviewForm.reviewText,
+          image: uploadedImage || null
+        });
+        setEditingId(null);
+      } else {
+        // Mode Tambah Baru
+        await addDoc(collection(db, 'reviews'), {
+          name: reviewForm.clientName,
+          service: reviewForm.treatment,
+          rating: Number(reviewForm.rating || 5),
+          comment: reviewForm.reviewText,
+          image: uploadedImage || null,
+          createdAt: serverTimestamp()
+        });
+      }
 
-    setReviewForm({ id: null, clientName: '', treatment: 'Basic Manicure + Gel Polish', reviewText: '' });
+      setReviewForm({ clientName: '', treatment: 'Basic Manicure + Gel Polish', rating: 5, reviewText: '' });
+      setUploadedImage(null);
+    } catch (error) {
+      alert('Gagal menyimpan ulasan: ' + error.message);
+    }
   };
 
   const handleEditReview = (item) => {
     setEditingId(item.id);
-    setReviewForm(item);
+    setReviewForm({
+      clientName: item.name || item.clientName || '',
+      treatment: item.service || item.treatment || 'Basic Manicure + Gel Polish',
+      rating: item.rating || 5,
+      reviewText: item.comment || item.reviewText || '',
+    });
+    setUploadedImage(item.image || null);
   };
 
-  const handleDeleteReview = (id) => {
-    if (window.confirm('Yakin ingin menghapus ulasan ini?')) {
-      setReviews((prev) => prev.filter((item) => item.id !== id));
-      if (editingId === id) {
-        setEditingId(null);
-        setReviewForm({ id: null, clientName: '', treatment: 'Basic Manicure + Gel Polish', reviewText: '' });
-      }
+const handleDelete = async (docId) => {
+  const confirmDelete = window.confirm("Yakin ingin menghapus data booking ini?");
+  if (confirmDelete) {
+    try {
+      await deleteDoc(doc(db, "bookings", docId));
+      alert("Data berhasil dihapus!");
+    } catch (error) {
+      console.error("Error menghapus data: ", error);
+      alert("Gagal menghapus data.");
     }
-  };
+  }
+};
 
   const handleCancelEdit = () => {
     setEditingId(null);
-    setReviewForm({ id: null, clientName: '', treatment: 'Basic Manicure + Gel Polish', reviewText: '' });
+    setReviewForm({ clientName: '', treatment: 'Basic Manicure + Gel Polish', rating: 5, reviewText: '' });
+    setUploadedImage(null);
   };
 
   return (
@@ -222,7 +341,7 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
                 <h3 className="font-bold text-brand-dark text-sm">
                   Kelola Slot Jam Tanggal: <span className="underline text-brand-ruby">{selectedAdminDate}</span>
                 </h3>
-                <span className="text-[11px] text-gray-500 font-semibold">Jam Operasional 08:00 - 21:00 WIB</span>
+                <span className="text-[11px] text-gray-500 font-semibold">Jam Operasional 09:00 - 21:00 WIB</span>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
@@ -302,7 +421,7 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
           </div>
         )}
 
-        {/* TAB 2: Kelola & Edit / Hapus Ulasan */}
+        {/* TAB 2: Kelola & Edit / Hapus Ulasan (Firestore Real-time) */}
         {activeAdminTab === 'upload-review' && (
           <div className="grid md:grid-cols-2 gap-6">
             
@@ -321,7 +440,7 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
 
               <div className="space-y-4 text-xs">
                 <div>
-                  <label className="block font-bold mb-1 text-brand-dark">Nama Pelanggan</label>
+                  <label className="block font-bold mb-1 text-brand-dark">Nama Pelanggan *</label>
                   <input
                     type="text"
                     required
@@ -346,16 +465,57 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 text-brand-dark">Upload Foto Hasil (Drag & Drop)</label>
-                  <div className="border-2 border-dashed border-brand-rose bg-brand-rose/20 p-6 text-center rounded-xl hover:bg-brand-rose/40 transition-colors cursor-pointer flex flex-col items-center justify-center">
-                    <span className="text-2xl mb-1">📸</span>
-                    <p className="text-brand-dark font-bold">Tarik & lepas foto di sini</p>
-                    <p className="text-brand-dark/70 text-[10px] mt-0.5">atau klik untuk memilih file (.jpg, .png)</p>
+                  <label className="block font-bold mb-1 text-brand-dark">Rating Star</label>
+                  <select
+                    value={reviewForm.rating}
+                    onChange={(e) => setReviewForm({ ...reviewForm, rating: Number(e.target.value) })}
+                    className="w-full p-3 border border-brand-rose rounded-xl focus:outline-none focus:border-brand-dark bg-white text-brand-dark"
+                  >
+                  <option value={5}>⭐⭐⭐⭐⭐ (5.0)</option>
+                  <option value={4}>⭐⭐⭐⭐ (4.0)</option>
+                  <option value={3}>⭐⭐⭐ (3.0)</option>
+                  <option value={2}>⭐⭐ (2.0)</option>
+                  <option value={1}>⭐ (1.0)</option>
+                  </select>
+                </div>
+
+                {/* AREA DRAG & DROP FOTO */}
+                <div>
+                  <label className="block font-bold mb-1 text-brand-dark">Upload Foto Hasil (Drag & Drop / Klik)</label>
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => document.getElementById('admin-file-upload').click()}
+                    className={`border-2 border-dashed border-brand-rose p-5 text-center rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center ${
+                      isDragOver ? 'bg-brand-rose/60' : 'bg-brand-rose/20 hover:bg-brand-rose/40'
+                    }`}
+                  >
+                    <input
+                      id="admin-file-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+
+                    {uploadedImage ? (
+                      <div className="space-y-2">
+                        <img src={uploadedImage} alt="Preview" className="w-24 h-24 object-cover rounded-xl border border-brand-rose mx-auto" />
+                        <p className="text-[10px] text-brand-dark font-bold">✓ Foto terpilih! Klik/Drop lagi untuk mengubah.</p>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-2xl mb-1">📸</span>
+                        <p className="text-brand-dark font-bold text-xs">Tarik & lepas foto di sini</p>
+                        <p className="text-brand-dark/70 text-[10px] mt-0.5">atau klik untuk memilih file (.jpg, .png)</p>
+                      </>
+                    )}
                   </div>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 text-brand-dark">Testimoni / Ulasan & Deskripsi</label>
+                  <label className="block font-bold mb-1 text-brand-dark">Testimoni / Ulasan & Deskripsi *</label>
                   <textarea
                     required
                     placeholder="Tuliskan ulasan pelanggan di sini..."
@@ -369,50 +529,61 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
                   type="submit"
                   className="w-full py-3.5 bg-brand-dark hover:bg-brand-dark/90 text-brand-creamy font-bold rounded-xl text-xs shadow-md transition-all"
                 >
-                  {editingId ? 'Simpan Perubahan Ulasan' : 'Publish ke Halaman Ulasan'}
+                  {editingId ? 'Simpan Perubahan Ulasan' : 'Publish ke Firestore'}
                 </button>
               </div>
             </form>
 
-            {/* Daftar Ulasan Terbit (Dapat Di-edit / Di-hapus) */}
+            {/* Daftar Ulasan Terbit dari Firestore */}
             <div className="bg-white p-6 rounded-2xl border border-brand-rose shadow-sm space-y-4">
               <h3 className="font-bold text-brand-dark text-sm border-b border-brand-rose/40 pb-2">
                 📋 Daftar Ulasan Diterbitkan ({reviews.length})
               </h3>
 
-              {reviews.length === 0 ? (
-                <p className="text-xs text-brand-dark/60 italic">Belum ada ulasan yang diupload.</p>
+              {loadingReviews ? (
+                <p className="text-xs text-brand-dark/60 italic font-bold">Memuat ulasan Firestore...</p>
+              ) : reviews.length === 0 ? (
+                <p className="text-xs text-brand-dark/60 italic">Belum ada ulasan di Firestore.</p>
               ) : (
                 <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                  {reviews.map((rev) => (
-                    <div key={rev.id} className="p-3.5 border border-brand-rose/50 rounded-xl bg-brand-creamy/10 flex justify-between items-start gap-3">
-                      <div className="space-y-1 text-xs flex-1">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-bold text-brand-dark">{rev.clientName}</h4>
-                          <span className="text-[9px] bg-brand-rose/40 font-bold px-2 py-0.5 rounded-md text-brand-dark">
-                            {rev.treatment}
-                          </span>
-                        </div>
-                        <p className="text-brand-dark/80 italic text-[11px]">"{rev.reviewText}"</p>
-                      </div>
+                  {reviews.map((rev) => {
+                    const clientName = rev.name || rev.clientName;
+                    const treatmentName = rev.service || rev.treatment;
+                    const commentText = rev.comment || rev.reviewText;
 
-                      {/* Tombol Aksi Edit & Hapus */}
-                      <div className="flex gap-1 shrink-0">
-                        <button
-                          onClick={() => handleEditReview(rev)}
-                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold transition-colors"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDeleteReview(rev.id)}
-                          className="px-2.5 py-1 bg-brand-ruby hover:bg-brand-ruby/90 text-white rounded-lg text-[10px] font-bold transition-colors"
-                        >
-                          Hapus
-                        </button>
+                    return (
+                      <div key={rev.id} className="p-3.5 border border-brand-rose/50 rounded-xl bg-brand-creamy/10 flex justify-between items-start gap-3">
+                        <div className="space-y-1.5 text-xs flex-1">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-bold text-brand-dark">{clientName}</h4>
+                            <span className="text-[9px] bg-brand-rose/40 font-bold px-2 py-0.5 rounded-md text-brand-dark">
+                              {treatmentName}
+                            </span>
+                          </div>
+                          <p className="text-brand-dark/80 italic text-[11px]">"{commentText}"</p>
+                          {rev.image && (
+                            <img src={rev.image} alt="Preview" className="w-16 h-16 object-cover rounded-lg border border-brand-rose" />
+                          )}
+                        </div>
+
+                        {/* Tombol Aksi Edit & Hapus */}
+                        <div className="flex gap-1 shrink-0">
+                          <button
+                            onClick={() => handleEditReview(rev)}
+                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteReview(rev.id)}
+                            className="px-2.5 py-1 bg-brand-ruby hover:bg-brand-ruby/90 text-white rounded-lg text-[10px] font-bold transition-colors"
+                          >
+                            Hapus
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -420,35 +591,91 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
           </div>
         )}
 
-        {/* TAB 3: History Pembayaran */}
-        {activeAdminTab === 'history' && (
-          <div className="bg-white p-6 rounded-2xl border border-brand-rose shadow-sm space-y-3">
-            <h3 className="font-bold text-brand-dark text-sm">Riwayat Transaksi (DP Rp 50.000 via QRIS Duitku)</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-brand-dark">
-                <thead className="bg-brand-rose text-brand-dark font-bold">
-                  <tr>
-                    <th className="p-3 rounded-l-xl">Nama & WA & IG</th>
-                    <th className="p-3">Tanggal & Jam</th>
-                    <th className="p-3">Layanan</th>
-                    <th className="p-3 rounded-r-xl">Status DP</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-brand-rose/30">
-                  <tr>
-                    <td className="p-3 font-bold">
-                      Amanda <br/>
-                      <span className="text-[10px] text-brand-dark/70 font-normal">087827562925 | @amanda</span>
-                    </td>
-                    <td className="p-3 font-semibold">14:00 WIB</td>
-                    <td className="p-3 font-semibold">Custom Soft Design</td>
-                    <td className="p-3 text-emerald-700 font-extrabold">DP PAID (Rp 50.000 - DuitKu)</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+{/* TAB 3: History Pembayaran Real-time */}
+{activeAdminTab === 'history' && (
+  <div className="bg-white p-6 rounded-2xl border border-[#F5C6CB] shadow-sm space-y-3">
+    <h3 className="font-bold text-[#550B18] text-sm">Riwayat Transaksi Booking (Real-time Firestore)</h3>
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs text-[#550B18]">
+        <thead className="bg-[#F5C6CB] text-[#550B18] font-bold">
+          <tr>
+            <th className="p-3 rounded-l-xl">Nama & WA & IG</th>
+            <th className="p-3">Tanggal & Jam</th>
+            <th className="p-3">Layanan</th>
+            <th className="p-3 rounded-r-xl">Status DP</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#F5C6CB]/30">
+          {bookings.length === 0 ? (
+            /* Contoh Data Dummy jika Belum Ada Transaksi */
+            <tr>
+              <td className="p-3 font-bold">
+                Amanda <br/>
+                <span className="text-[10px] text-[#550B18]/70 font-normal">087827562925 | @amanda</span>
+              </td>
+              <td className="p-3 font-semibold">14:00 WIB</td>
+              <td className="p-3 font-semibold">Custom Soft Design</td>
+              <td className="p-3 text-emerald-700 font-extrabold">DP PAID (Rp 50.000 - DuitKu)</td>
+            </tr>
+          ) : (
+bookings.map((item) => {
+              // Resolusi data dinamis
+              const name = item.customerName || item.name || item.clientName || 'Pelanggan';
+              const wa = item.customerWa || item.phone || '-';
+              const service = item.serviceName || item.service || item.treatment || '-';
+              const timeSlot = item.time ? `${item.time} WIB` : '-';
+              const dateSlot = item.date || '';
+              
+              // Format waktu realtime pembuatan order (dari Firestore createdAt)
+              const orderTime = item.createdAt && typeof item.createdAt.toDate === 'function'
+                ? item.createdAt.toDate().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) 
+                : 'Waktu tidak terekam';
+
+              return (
+                <tr key={item.id || Math.random()} className="border-b hover:bg-gray-50">
+                  {/* Kolom 1: Nama, WA & Waktu Pesan (IG Dihapus) */}
+                  <td className="p-3 font-bold">
+                    {name} <br/>
+                    <span className="text-[11px] text-[#550B18]/70 font-normal">
+                      WA: {wa}
+                    </span>
+                    {/* Waktu pemesanan real-time */}
+                    <div className="text-[10px] text-gray-500 font-normal mt-1">
+                      Dipesan: {orderTime}
+                    </div>
+                  </td>
+
+                  {/* Kolom 2: Tanggal & Jam */}
+                  <td className="p-3 font-semibold">
+                    {dateSlot ? `${dateSlot} (${timeSlot})` : timeSlot}
+                  </td>
+
+                  {/* Kolom 3: Jenis Layanan */}
+                  <td className="p-3 font-semibold">{service}</td>
+
+                  {/* Kolom 4: Status DP */}
+                  <td className="p-3 text-emerald-700 font-extrabold">
+                    {item.status || 'DP PAID (Rp 50.000 - DuitKu)'}
+                  </td>
+
+                  {/* Kolom 5: Tombol Aksi (Hapus) */}
+                  <td className="p-3">
+                    <button 
+                      onClick={() => handleDelete(item.id)}
+                      className="bg-red-600 text-white px-3 py-1.5 rounded-md text-xs font-bold hover:bg-red-700 transition shadow-sm"
+                    >
+                      Hapus
+                    </button>
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}
 
       </div>
     </div>
