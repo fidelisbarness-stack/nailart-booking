@@ -141,7 +141,11 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
   // Form State
   const [customerName, setCustomerName] = useState('');
   const [customerWa, setCustomerWa] = useState('');
-  const [personCount, setPersonCount] = useState(1);
+  const [personCount, setPersonCount] = useState('1');
+  const personCountNumber = Number.parseInt(personCount, 10);
+  const validPersonCount = Number.isInteger(personCountNumber) && personCountNumber > 0
+    ? personCountNumber
+    : 1;
   
   const [selectedDate, setSelectedDate] = useState(datesList[0].fullDate);
   const [selectedTimes, setSelectedTimes] = useState([]);
@@ -372,7 +376,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
       showAlert('Nomor WhatsApp wajib diisi terlebih dahulu!', 'Perhatian', 'warning');
       return;
     }
-    if (!Number.isInteger(personCount) || personCount < 1) {
+    if (!/^[1-9]\d*$/.test(personCount)) {
       showAlert('Jumlah orang minimal 1.', 'Perhatian', 'warning');
       return;
     }
@@ -443,7 +447,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
       return;
     }
 
-    const peopleWithoutTreatment = Array.from({ length: personCount }, (_, personIndex) => personIndex)
+    const peopleWithoutTreatment = Array.from({ length: validPersonCount }, (_, personIndex) => personIndex)
       .filter((personIndex) => !selectedServices.some((service) => service.personIndex === personIndex));
 
     if (peopleWithoutTreatment.length > 0) {
@@ -469,7 +473,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
         id: generatedId,
         customerName,
         customerWa,
-        personCount,
+        personCount: validPersonCount,
         serviceName: serviceNamesFormatted,
         services: selectedServices,
         dpPaid: DP_AMOUNT,
@@ -496,7 +500,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
             setLoading(false);
 
             const WA_NUMBER = '6287827562925'; 
-            const waText = `Halo Admin Vinail's!\nSaya baru saja MENYELESAIKAN pembayaran DP Rp ${DP_AMOUNT.toLocaleString('id-ID')} via QRIS.\n\n*ID Booking:* ${generatedId}\n*Nama:* ${customerName}\n*Jumlah Orang:* ${personCount}\n*Jadwal:* ${selectedDate} (Jam ${bookedTimeDisplay})\n*Layanan:* ${serviceNamesFormatted}\n\nMohon konfirmasi jadwalnya ya kak, terima kasih!`;
+            const waText = `Halo Admin Vinail's!\nSaya baru saja MENYELESAIKAN pembayaran DP Rp ${DP_AMOUNT.toLocaleString('id-ID')} via QRIS.\n\n*ID Booking:* ${generatedId}\n*Nama:* ${customerName}\n*Jumlah Orang:* ${validPersonCount}\n*Jadwal:* ${selectedDate} (Jam ${bookedTimeDisplay})\n*Layanan:* ${serviceNamesFormatted}\n\nMohon konfirmasi jadwalnya ya kak, terima kasih!`;
 
             window.open(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(waText)}`, '_blank');
           },
@@ -583,20 +587,52 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
 
             <div>
               <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">Jumlah Orang *</label>
-              <input
-                type="number"
-                required
-                min="1"
-                step="1"
-                value={personCount}
-                onChange={(e) => {
-                  const nextCount = Math.max(1, Number.parseInt(e.target.value, 10) || 1);
-                  setPersonCount(nextCount);
-                  setSelectedServices((services) => services.filter((service) => service.personIndex < nextCount));
-                  setSelectedTimes([]);
-                }}
-                className="w-full p-3.5 border border-gray-300 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-[#550B18]"
-              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Kurangi jumlah orang"
+                  disabled={validPersonCount <= 1}
+                  onClick={() => {
+                    const nextCount = Math.max(1, validPersonCount - 1);
+                    setPersonCount(String(nextCount));
+                    setSelectedServices((services) => services.filter((service) => service.personIndex < nextCount));
+                    setSelectedTimes([]);
+                  }}
+                  className="w-12 h-12 rounded-xl border border-gray-300 text-lg font-bold text-[#550B18] disabled:opacity-40"
+                >
+                  −
+                </button>
+                <input
+                  type="text"
+                  required
+                  inputMode="numeric"
+                  pattern="[1-9][0-9]*"
+                  aria-label="Jumlah orang"
+                  value={personCount}
+                  onChange={(e) => {
+                    const nextValue = e.target.value.replace(/\D/g, '');
+                    setPersonCount(nextValue);
+                    if (/^[1-9]\d*$/.test(nextValue)) {
+                      const nextCount = Number.parseInt(nextValue, 10);
+                      setSelectedServices((services) => services.filter((service) => service.personIndex < nextCount));
+                      setSelectedTimes([]);
+                    }
+                  }}
+                  className="min-w-0 flex-1 p-3.5 border border-gray-300 rounded-2xl text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#550B18]"
+                />
+                <button
+                  type="button"
+                  aria-label="Tambah jumlah orang"
+                  onClick={() => {
+                    const nextCount = validPersonCount + 1;
+                    setPersonCount(String(nextCount));
+                    setSelectedTimes([]);
+                  }}
+                  className="w-12 h-12 rounded-xl border border-gray-300 text-lg font-bold text-[#550B18]"
+                >
+                  +
+                </button>
+              </div>
               <p className="text-[11px] text-gray-500 mt-1">Treatment akan dipilih terpisah untuk setiap orang.</p>
             </div>
           </div>
@@ -620,7 +656,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
             <div>
               <p className="text-[10px] text-gray-500 uppercase font-bold">Pemesan</p>
               <p className="font-extrabold text-xs sm:text-sm text-[#550B18]">
-                {customerName} ({customerWa}) · {personCount} orang
+                {customerName} ({customerWa}) · {validPersonCount} orang
               </p>
             </div>
             <button type="button" onClick={() => setStep(1)} className="text-xs text-[#550B18] underline font-bold hover:opacity-80">
@@ -632,7 +668,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
           <div className="order-4 space-y-2">
             <div className="flex justify-between items-center">
               <label className="block text-xs font-extrabold uppercase text-gray-700">
-                3. Pilih Jenis Treatment untuk {personCount} Orang *
+                3. Pilih Jenis Treatment untuk {validPersonCount} Orang *
               </label>
               <span className="text-[10px] text-[#550B18] bg-[#FFF9F6] px-2 py-0.5 rounded-md font-bold border border-[#F5C6CB]">
                 {needsTwoSlots ? '⚡ Minimal 2 slot berurutan' : 'Pilih Nailart Tangan / Kaki / Remove'}
@@ -640,7 +676,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
             </div>
 
             <div className="space-y-4">
-              {Array.from({ length: personCount }, (_, personIndex) => (
+              {Array.from({ length: validPersonCount }, (_, personIndex) => (
                 <section key={personIndex} className="space-y-3 rounded-2xl border border-[#F5C6CB] p-3">
                   <h3 className="text-sm font-black text-[#550B18]">Treatment Orang {personIndex + 1}</h3>
                   <div className="space-y-3">
@@ -1041,7 +1077,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Jumlah Orang:</span>
-                <span className="font-bold text-[#550B18]">{personCount} orang</span>
+                <span className="font-bold text-[#550B18]">{validPersonCount} orang</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Tanggal & Jam:</span>
@@ -1068,7 +1104,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
                 setStep(1);
                 setCustomerName('');
                 setCustomerWa('');
-                setPersonCount(1);
+                setPersonCount('1');
                 setSelectedTimes([]);
                 setSelectedServices([]);
                 setExpandedCatIdx({});
