@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { createDuitkuTransaction } from '../services/duitku';
 import { getBookingSlotTimes } from '../utils/bookingSlots';
@@ -491,10 +491,7 @@ export default function Booking({ globalSlots, setGlobalSlots }) {
 
       if (duitkuRes && duitkuRes.statusCode === '00') {
         window.checkout.process(duitkuRes.reference, {
-          successEvent: async function(result) {
-            newBooking.createdAt = serverTimestamp();
-            await addDoc(collection(db, 'bookings'), newBooking);
-
+          successEvent: function() {
             setLastBookingId(generatedId);
             setStep(3);
             setLoading(false);

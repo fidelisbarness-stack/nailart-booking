@@ -3,17 +3,17 @@ export const createDuitkuTransaction = async (bookingData) => {
     const response = await fetch('/api/create-qris', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        amount: bookingData.dpPaid,
-        name: bookingData.customerName,
-        email: 'customer@gmail.com',
-        phoneNumber: bookingData.customerWa,
-        orderId: bookingData.id,
-        productDetails: `DP Booking - ${bookingData.serviceName}`,
-      }),
+      body: JSON.stringify({ booking: bookingData }),
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(`Server returned an invalid response (HTTP ${response.status})`);
+    }
+
     if (!response.ok) {
       return {
         statusCode: data.statusCode || '99',
