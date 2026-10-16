@@ -11,6 +11,7 @@ import {
   orderBy, 
   serverTimestamp 
 } from 'firebase/firestore';
+import { getBookingSlotTimes } from '../utils/bookingSlots';
 
 // Helper fungsi tanggal lokal YYYY-MM-DD
 const getLocalDateString = (dateObj) => {
@@ -154,8 +155,9 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
     const map = {};
     bookings.forEach((b) => {
       if (b.date === selectedAdminDate && b.time) {
-        const cleanTime = b.time.substring(0, 5);
-        map[cleanTime] = b;
+        getBookingSlotTimes(b).forEach((time) => {
+          map[time] = b;
+        });
       }
     });
     return map;
@@ -189,7 +191,7 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
       : DEFAULT_HOURS.map((time) => ({ time, isBlocked: false }));
 
     const dayBookings = bookings.filter((b) => b.date === dateVal && b.time);
-    const bookedTimesSet = new Set(dayBookings.map((b) => b.time.substring(0, 5)));
+    const bookedTimesSet = new Set(dayBookings.flatMap(getBookingSlotTimes));
 
     let bookedCount = 0;
     let blockedCount = 0;
@@ -819,6 +821,9 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
                             <p className="font-bold text-brand-dark text-sm">{name}</p>
                             <p className="text-[11px] text-brand-dark/80 font-medium mt-0.5">
                               📞: <span className="font-bold">{wa}</span>
+                            </p>
+                            <p className="text-[11px] text-brand-dark/80 font-medium mt-0.5">
+                              👥: <span className="font-bold">{item.personCount || 1} orang</span>
                             </p>
                             <p className="text-[10px] text-gray-400 mt-1">
                               Dipesan: {orderTime}
