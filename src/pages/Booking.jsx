@@ -1,51 +1,259 @@
-import React, { useState, useMemo } from 'react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { createDuitkuTransaction } from '../services/duitku';
+
+import removeImg from '../assets/remove.jpeg'; 
+import nailartTanganImg from '../assets/NailTangan.jpeg'; 
+import nailartKakiImg from '../assets/NailKaki.jpeg';
 
 const DEFAULT_HOURS = [
   '09:00', '10:00', '11:00', '12:00', '13:00', 
   '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'
 ];
 
-export default function Booking({ bookings = [], setBookings, globalSlots, setGlobalSlots }) {
+// Helper fungsi tanggal lokal YYYY-MM-DD
+const getLocalDateString = (dateObj) => {
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// DATA MASTER TREATMENT
+const TREATMENT_CATEGORIES = [
+  {
+    categoryId: 'nailart-tangan',
+    categoryName: '1. Nailart Tangan',
+    prefix: 'Nailart Tangan',
+    description: 'Perawatan dan pewarnaan kuku tangan dengan pilihan Kuku Asli atau Extension.',
+    image: nailartTanganImg,
+    types: [
+      {
+        typeId: 'kuku-asli',
+        typeName: 'Kuku Asli',
+        options: [
+          { id: 'nat-asli-polos', name: 'Polos' },
+          { id: 'nat-asli-desain', name: 'Desain' }
+        ]
+      },
+      {
+        typeId: 'extension',
+        typeName: 'Extension',
+        options: [
+          { id: 'nat-ext-polos', name: 'Polos' },
+          { id: 'nat-ext-desain', name: 'Desain' }
+        ]
+      }
+    ]
+  },
+  {
+    categoryId: 'nailart-kaki',
+    categoryName: '2. Nailart Kaki',
+    prefix: 'Nailart Kaki',
+    description: 'Perawatan dan pewarnaan kuku kaki dengan pilihan Kuku Asli atau Extension.',
+    image: nailartKakiImg,
+    types: [
+      {
+        typeId: 'kuku-asli',
+        typeName: 'Kuku Asli',
+        options: [
+          { id: 'nak-asli-polos', name: 'Polos' },
+          { id: 'nak-asli-desain', name: 'Desain' }
+        ]
+      },
+      {
+        typeId: 'extension',
+        typeName: 'Extension',
+        options: [
+          { id: 'nak-ext-polos', name: 'Polos' },
+          { id: 'nak-ext-desain', name: 'Desain' }
+        ]
+      }
+    ]
+  },
+  {
+    categoryId: 'hanya-remove',
+    categoryName: '3. Hanya Remove (Tanpa Nailart)',
+    prefix: 'Remove',
+    description: 'Pembersihan dan pelepasan kutek/extension secara rapi dan aman.',
+    image: removeImg,
+    items: [
+      { id: 'rem-tangan', name: 'Tangan' },
+      { id: 'rem-kaki', name: 'Kaki' },
+    ]
+  }
+];
+
+export default function Booking({ globalSlots, setGlobalSlots }) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [bookedTimes, setBookedTimes] = useState([]); 
+  const [adminScheduleSlots, setAdminScheduleSlots] = useState([]);
 
+  // Accordion Category State
+  const [expandedCatIdx, setExpandedCatIdx] = useState(0);
+  const [openTypeState, setOpenTypeState] = useState({});
+
+  // STATE CUSTOM MODAL
+  const [modal, setModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+
+  const showAlert = (message, title = 'Pemberitahuan', type = 'info') => {
+    setModal({ isOpen: true, title, message, type });
+  };
+
+  const closeModal = () => {
+    setModal((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  // Kalkulasi tanggal dinamis (7 Hari Ke Depan)
   const datesList = useMemo(() => {
     const list = [];
     const today = new Date();
+    const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
     for (let i = 0; i < 7; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
-      const dateVal = d.toISOString().split('T')[0];
+      const dateVal = getLocalDateString(d);
 
-      let label = d.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' });
-      if (i === 0) label = 'Hari Ini';
-      if (i === 1) label = 'Besok';
+      let dayLabel = days[d.getDay()];
+      if (i === 0) dayLabel = 'Hari Ini';
+      if (i === 1) dayLabel = 'Besok';
 
-      list.push({ label, value: dateVal });
+      list.push({
+        fullDate: dateVal,
+        dayName: dayLabel,
+        dayNumber: d.getDate(),
+        monthName: months[d.getMonth()],
+      });
     }
     return list;
   }, []);
 
-  const services = [
-    { id: 1, name: 'Gel Polish Single Color', price: 120000, duration: '60 Menit' },
-    { id: 2, name: 'Nail Art Custom Full Set', price: 250000, duration: '90 Menit' },
-    { id: 3, name: 'Spa Manicure & Extension', price: 300000, duration: '120 Menit' },
-  ];
-
-  const DP_AMOUNT = 50000;
-
+  // Form State
   const [customerName, setCustomerName] = useState('');
   const [customerWa, setCustomerWa] = useState('');
-  const [customerIg, setCustomerIg] = useState('');
   
-  const [selectedDate, setSelectedDate] = useState(datesList[0].value);
+  const [selectedDate, setSelectedDate] = useState(datesList[0].fullDate);
   const [selectedTime, setSelectedTime] = useState(null);
-  const [selectedService, setSelectedService] = useState(services[0]);
+  
+  // STATE SELEKSI TREATMENT
+  const [selectedServices, setSelectedServices] = useState([]);
   const [lastBookingId, setLastBookingId] = useState('');
+
+  // HITUNG HANYA TREATMENT UTAMA (Nailart Tangan & Nailart Kaki)
+  const mainNailartCount = useMemo(() => {
+    // Memastikan hanya menghitung opsi desain/polos dari kategori nailart tangan & kaki
+    return selectedServices.filter(s => 
+      (s.categoryId === 'nailart-tangan' || s.categoryId === 'nailart-kaki') && 
+      !s.id.includes('remove')
+    ).length;
+  }, [selectedServices]);
+
+  // DP Dinamis: Rp 50.000 per treatment utama
+  const DP_AMOUNT = Math.max(1, mainNailartCount) * 50000;
+
+  // Cek apakah butuh 2 slot waktu beruntun (jika pilih Tangan DAN Kaki)
+  const needsTwoSlots = mainNailartCount >= 2;
+
+  // Helper untuk mendapatkan indeks jam berikutnya
+  const getNextHourSlot = (timeStr) => {
+    const idx = DEFAULT_HOURS.indexOf(timeStr);
+    if (idx !== -1 && idx < DEFAULT_HOURS.length - 1) {
+      return DEFAULT_HOURS[idx + 1];
+    }
+    return null;
+  };
+
+  const handleSelectNailartOption = (cat, typeObj, optionItem) => {
+    const formattedItem = {
+      id: optionItem.id,
+      categoryId: cat.categoryId,
+      typeId: typeObj.typeId,
+      typeName: typeObj.typeName,
+      optionName: optionItem.name,
+      fullName: `${cat.prefix} - ${typeObj.typeName} (${optionItem.name})`
+    };
+
+    const otherServices = selectedServices.filter((s) => s.categoryId !== cat.categoryId);
+    const isAlreadySelected = selectedServices.some((s) => s.id === optionItem.id);
+
+    if (isAlreadySelected) {
+      setSelectedServices(otherServices);
+    } else {
+      setSelectedServices([...otherServices, formattedItem]);
+    }
+
+    setSelectedTime(null);
+  };
+
+  const handleToggleRemove = (cat, item) => {
+    const isAlreadySelected = selectedServices.some((s) => s.id === item.id);
+
+    const formattedItem = {
+      ...item,
+      categoryId: cat.categoryId,
+      fullName: `${cat.prefix} (${item.name})`
+    };
+
+    if (cat.categoryId === 'hanya-remove') {
+      const currentRemoveOnly = selectedServices.filter((s) => s.categoryId === 'hanya-remove');
+      if (isAlreadySelected) {
+        setSelectedServices(currentRemoveOnly.filter((s) => s.id !== item.id));
+      } else {
+        setSelectedServices([...currentRemoveOnly, formattedItem]);
+      }
+    } else {
+      if (isAlreadySelected) {
+        setSelectedServices(selectedServices.filter((s) => s.id !== item.id));
+      } else {
+        setSelectedServices([...selectedServices, formattedItem]);
+      }
+    }
+  };
+
+  // Real-time listener booking
+  useEffect(() => {
+    if (!selectedDate) return;
+
+    const q = query(
+      collection(db, 'bookings'),
+      where('date', '==', selectedDate)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const times = snapshot.docs.map((docSnap) => docSnap.data().time);
+      setBookedTimes(times);
+    }, (error) => {
+      console.error("Error fetching booked slots:", error);
+    });
+
+    return () => unsubscribe();
+  }, [selectedDate]);
+
+  // Real-time listener slot admin
+  useEffect(() => {
+    if (!selectedDate) return;
+
+    const unsubSchedule = onSnapshot(doc(db, 'schedules', selectedDate), (docSnap) => {
+      if (docSnap.exists()) {
+        setAdminScheduleSlots(docSnap.data().slots || []);
+      } else {
+        setAdminScheduleSlots([]);
+      }
+    }, (error) => {
+      console.error("Error fetching admin schedule:", error);
+    });
+
+    return () => unsubSchedule();
+  }, [selectedDate]);
 
   const handleNameChange = (e) => {
     const value = e.target.value;
@@ -61,28 +269,92 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
     }
   };
 
+  // Slot aktif & Cut-off
   const activeSlots = useMemo(() => {
-    if (globalSlots && globalSlots[selectedDate]) {
-      return globalSlots[selectedDate];
-    }
-    return DEFAULT_HOURS.map((t) => ({
-      time: t,
-      status: 'available',
-      slotsLeft: 2,
-      isBlocked: false,
-      reason: ''
-    }));
-  }, [globalSlots, selectedDate]);
+    const now = new Date();
+    const todayFormatted = getLocalDateString(now);
+
+    const isTodaySelected = selectedDate === todayFormatted;
+    const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const effectiveAdminSlots = (globalSlots && globalSlots[selectedDate]) 
+      ? globalSlots[selectedDate] 
+      : adminScheduleSlots;
+
+    return DEFAULT_HOURS.map((t) => {
+      const isAlreadyBooked = bookedTimes.includes(t);
+      
+      let isPastCutoff = false;
+      if (isTodaySelected) {
+        const [slotHour, slotMinute] = t.split(':').map(Number);
+        const slotTotalMinutes = slotHour * 60 + (slotMinute || 0);
+        const cutoffMinutes = slotTotalMinutes - 60; 
+
+        if (currentTotalMinutes > cutoffMinutes) {
+          isPastCutoff = true;
+        }
+      }
+
+      const customSlot = effectiveAdminSlots.find((s) => s.time === t);
+      const isAdminBlocked = customSlot ? customSlot.isBlocked : false;
+      const adminReason = customSlot ? customSlot.reason : '';
+
+      let isNextSlotUnavailable = false;
+      let nextTime = null;
+      if (needsTwoSlots) {
+        nextTime = getNextHourSlot(t);
+        if (!nextTime) {
+          isNextSlotUnavailable = true;
+        } else {
+          const isNextBooked = bookedTimes.includes(nextTime);
+          const nextCustomSlot = effectiveAdminSlots.find((s) => s.time === nextTime);
+          const isNextAdminBlocked = nextCustomSlot ? nextCustomSlot.isBlocked : false;
+          
+          let isNextPastCutoff = false;
+          if (isTodaySelected) {
+            const [nextHour, nextMin] = nextTime.split(':').map(Number);
+            const nextTotalMin = nextHour * 60 + (nextMin || 0);
+            if (currentTotalMinutes > (nextTotalMin - 60)) {
+              isNextPastCutoff = true;
+            }
+          }
+
+          if (isNextBooked || isNextAdminBlocked || isNextPastCutoff) {
+            isNextSlotUnavailable = true;
+          }
+        }
+      }
+
+      const isUnavailable = isAlreadyBooked || isPastCutoff || isAdminBlocked || isNextSlotUnavailable;
+
+      let statusReason = 'Tersedia';
+      if (isAlreadyBooked || (needsTwoSlots && bookedTimes.includes(nextTime))) {
+        statusReason = 'Booked';
+      } else if (isAdminBlocked || (needsTwoSlots && effectiveAdminSlots.find(s => s.time === nextTime)?.isBlocked)) {
+        statusReason = adminReason || 'Libur / Tutup';
+      } else if (isPastCutoff || isNextSlotUnavailable) {
+        statusReason = needsTwoSlots && isNextSlotUnavailable ? 'Kurang 2 Jam' : 'Lewat';
+      }
+
+      return {
+        time: t,
+        status: isUnavailable ? 'full' : 'available',
+        slotsLeft: isUnavailable ? 0 : 1,
+        isBlocked: isUnavailable,
+        reason: statusReason
+      };
+    });
+  }, [globalSlots, adminScheduleSlots, selectedDate, bookedTimes, needsTwoSlots]);
 
   const handleNextStep = (e) => {
     e.preventDefault();
 
     if (!customerName.trim()) {
-      alert('Nama Lengkap wajib diisi (hanya huruf)!');
+      showAlert('Nama Lengkap wajib diisi terlebih dahulu!', 'Perhatian', 'warning');
       return;
     }
     if (!customerWa.trim()) {
-      alert('Nomor WhatsApp wajib diisi (hanya angka)!');
+      showAlert('Nomor WhatsApp wajib diisi terlebih dahulu!', 'Perhatian', 'warning');
       return;
     }
 
@@ -98,7 +370,12 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
     e.preventDefault();
 
     if (!selectedTime) {
-      alert('Silakan pilih jam kedatangan!');
+      showAlert('Silakan pilih jam kedatangan Anda terlebih dahulu.', 'Jam Belum Dipilih', 'warning');
+      return;
+    }
+
+    if (selectedServices.length === 0) {
+      showAlert('Silakan pilih minimal 1 jenis treatment terlebih dahulu.', 'Treatment Belum Dipilih', 'warning');
       return;
     }
 
@@ -106,84 +383,73 @@ export default function Booking({ bookings = [], setBookings, globalSlots, setGl
 
     try {
       const generatedId = `TIX-DP-${Math.floor(100000 + Math.random() * 900000)}`;
-      const remainingPay = Math.max(0, selectedService.price - DP_AMOUNT);
-      const formattedIg = customerIg ? (customerIg.startsWith('@') ? customerIg : `@${customerIg}`) : '-';
+      const serviceNamesFormatted = selectedServices.map((s) => s.fullName).join(', ');
+
+      const nextSlotTime = needsTwoSlots ? getNextHourSlot(selectedTime) : null;
+      const bookedTimeDisplay = nextSlotTime 
+        ? `${selectedTime} & ${nextSlotTime} WIB (2 Slot)` 
+        : `${selectedTime} WIB`;
 
       const newBooking = {
         id: generatedId,
         customerName,
         customerWa,
-        customerIg: formattedIg,
-        serviceName: selectedService.name,
-        totalPrice: selectedService.price,
+        serviceName: serviceNamesFormatted,
         dpPaid: DP_AMOUNT,
-        remainingPayment: remainingPay,
         date: selectedDate,
-        time: selectedTime,
+        time: bookedTimeDisplay,
         status: 'DP Paid (Confirmed)', 
         paymentMethod: 'QRIS (Duitku)',
       };
 
-      const duitkuRes = await createDuitkuTransaction(newBooking);
-console.log('Duitku Response:', duitkuRes);
+      const duitkuRes = await createDuitkuTransaction({
+        ...newBooking,
+        dpPaid: DP_AMOUNT 
+      });
+
       if (duitkuRes && duitkuRes.statusCode === '00') {
         window.checkout.process(duitkuRes.reference, {
           successEvent: async function(result) {
             newBooking.createdAt = serverTimestamp();
             await addDoc(collection(db, 'bookings'), newBooking);
 
-            if (setGlobalSlots) {
-              setGlobalSlots((prev) => {
-                const updated = (prev[selectedDate] || activeSlots).map((slot) => {
-                  if (slot.time === selectedTime) {
-                    const nextLeft = Math.max(0, (slot.slotsLeft ?? 1) - 1);
-                    return { ...slot, slotsLeft: nextLeft, status: nextLeft === 0 ? 'full' : 'available' };
-                  }
-                  return slot;
-                });
-                return { ...prev, [selectedDate]: updated };
-              });
-            }
-
             setLastBookingId(generatedId);
             setStep(3);
             setLoading(false);
 
             const WA_NUMBER = '6287827562925'; 
-            const waText = `Halo Admin Vinail's!\nSaya baru saja MENYELESAIKAN pembayaran DP Rp 50.000 via QRIS.\n\n*ID Booking:* ${generatedId}\n*Nama:* ${customerName}\n*Jadwal:* ${selectedDate} (Jam ${selectedTime})\n*Layanan:* ${selectedService.name}\n*Sisa Pelunasan di Studio:* Rp ${remainingPay.toLocaleString('id-ID')}\n\nMohon konfirmasi jadwalnya ya kak, terima kasih!`;
+            const waText = `Halo Admin Vinail's!\nSaya baru saja MENYELESAIKAN pembayaran DP Rp ${DP_AMOUNT.toLocaleString('id-ID')} via QRIS.\n\n*ID Booking:* ${generatedId}\n*Nama:* ${customerName}\n*Jadwal:* ${selectedDate} (Jam ${bookedTimeDisplay})\n*Layanan:* ${serviceNamesFormatted}\n\nMohon konfirmasi jadwalnya ya kak, terima kasih!`;
 
             window.open(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(waText)}`, '_blank');
           },
           pendingEvent: function(result) {
-            alert('Pembayaran masih diproses.');
+            showAlert('Status pembayaran Anda masih menunggu diproses.', 'Info Pembayaran', 'info');
             setLoading(false);
           },
           errorEvent: function(result) {
-            alert('Terjadi kesalahan pada sistem pembayaran.');
+            showAlert('Terjadi kesalahan pada transaksi pembayaran.', 'Pembayaran Gagal', 'error');
             setLoading(false);
           },
           closeEvent: function(result) {
-            alert('Anda membatalkan pembayaran. Data booking belum disimpan.');
+            showAlert('Anda membatalkan halaman pembayaran. Data booking belum tersimpan.', 'Pembayaran Dibatalkan', 'warning');
             setLoading(false); 
           }
         });
 
       } else {
-        alert(`Gagal membuat link Duitku: ${duitkuRes?.statusMessage}`);
+        showAlert(`Gagal terhubung ke gateway: ${duitkuRes?.statusMessage || 'Terjadi kesalahan'}`, 'Gagal Duitku', 'error');
         setLoading(false);
       }
     } catch (error) {
-      console.error('Error:', error);
-      alert('Terjadi kesalahan jaringan.');
+      showAlert('Terjadi kesalahan koneksi atau server.', 'Kesalahan Jaringan', 'error');
       setLoading(false);
     }
   };
 
-  const remainingBalance = Math.max(0, selectedService.price - DP_AMOUNT);
-
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+    <div className="max-w-xl mx-auto px-3 sm:px-4 py-6 space-y-6 relative">
       
+      {/* STEPPER HEADER */}
       {step !== 3 && (
         <div className="bg-white p-4 rounded-3xl border border-[#F5C6CB] shadow-sm flex items-center justify-between text-xs font-bold">
           <div className={`flex items-center gap-2 ${step >= 1 ? 'text-[#550B18]' : 'text-gray-400'}`}>
@@ -204,6 +470,7 @@ console.log('Duitku Response:', duitkuRes);
         </div>
       )}
 
+      {/* STEP 1: FORM ISIAN USER */}
       {step === 1 && (
         <form onSubmit={handleNextStep} className="bg-white p-6 md:p-8 rounded-3xl border border-[#F5C6CB] shadow-md space-y-6">
           <div className="border-b border-gray-100 pb-4">
@@ -213,7 +480,7 @@ console.log('Duitku Response:', duitkuRes);
 
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">Nama Lengkap</label>
+              <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">Nama Lengkap *</label>
               <input
                 type="text"
                 required
@@ -225,7 +492,7 @@ console.log('Duitku Response:', duitkuRes);
             </div>
 
             <div>
-              <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">Nomor WhatsApp</label>
+              <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">Nomor WhatsApp *</label>
               <input
                 type="tel"
                 required
@@ -241,170 +508,398 @@ console.log('Duitku Response:', duitkuRes);
             type="submit"
             className="w-full bg-[#550B18] text-white py-4 rounded-2xl font-black text-sm hover:bg-[#3d0711] transition-all shadow-lg flex items-center justify-center gap-2"
           >
-            <span>Pilih Jadwal & Layanan</span>
+            <span>Lanjut Pilih Jadwal & Treatment</span>
             <span>→</span>
           </button>
         </form>
       )}
 
+      {/* STEP 2 */}
       {step === 2 && (
         <form onSubmit={handleSubmitBooking} className="space-y-6">
-          <div className="bg-[#FFF9F6] p-4 rounded-2xl border border-[#F5C6CB] flex justify-between items-center">
+          
+          {/* HEADER BIODATA COMPACT */}
+          <div className="bg-[#FFF9F6] p-4 rounded-2xl border border-[#F5C6CB] flex justify-between items-center shadow-xs">
             <div>
               <p className="text-[10px] text-gray-500 uppercase font-bold">Pemesan</p>
-              <p className="font-extrabold text-sm text-[#550B18]">
-                {customerName} ({customerWa}{customerIg ? ` | ${customerIg.startsWith('@') ? customerIg : `@${customerIg}`}` : ''})
+              <p className="font-extrabold text-xs sm:text-sm text-[#550B18]">
+                {customerName} ({customerWa})
               </p>
             </div>
-            <button type="button" onClick={() => setStep(1)} className="text-xs text-[#550B18] underline font-bold">
+            <button type="button" onClick={() => setStep(1)} className="text-xs text-[#550B18] underline font-bold hover:opacity-80">
               Ubah Data
             </button>
           </div>
 
-          <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#F5C6CB] shadow-md space-y-6">
-            <div>
-              <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">
-                1. Pilih Tanggal 
+          {/* 1. PILIH TREATMENT */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="block text-xs font-extrabold uppercase text-gray-700">
+                1. Pilih Jenis Treatment *
               </label>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {datesList.map((d) => (
+              <span className="text-[10px] text-[#550B18] bg-[#FFF9F6] px-2 py-0.5 rounded-md font-bold border border-[#F5C6CB]">
+                {needsTwoSlots ? '⚡ Pilih Tangan & Kaki (Otomatis 2 Slot / 2 Jam)' : 'Pilih Nailart Tangan / Kaki / Remove'}
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {TREATMENT_CATEGORIES.map((cat, catIdx) => {
+                const isExpanded = expandedCatIdx === catIdx;
+                const isRemoveCategory = cat.categoryId === 'hanya-remove';
+
+                return (
+                  <div 
+                    key={cat.categoryId} 
+                    className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden transition-all duration-300"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setExpandedCatIdx(isExpanded ? null : catIdx)}
+                      className="w-full p-3.5 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 pr-2">
+                        <img
+                          src={cat.image}
+                          alt={cat.categoryName}
+                          className="w-12 h-12 rounded-xl object-cover shadow-xs flex-shrink-0 border border-gray-100"
+                        />
+                        <div>
+                          <h3 className="text-xs sm:text-sm font-bold text-gray-900 leading-snug">
+                            {cat.categoryName}
+                          </h3>
+                          <p className="text-[11px] text-gray-400 mt-0.5 line-clamp-1">
+                            {cat.description}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-gray-400 p-1">
+                        <svg
+                          className={`w-5 h-5 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="px-3 pb-3 pt-1 space-y-2 border-t border-gray-100 bg-gray-50/50">
+                        {isRemoveCategory ? (
+                          cat.items.map((item) => {
+                            const isSelected = selectedServices.some((s) => s.id === item.id);
+                            return (
+                              <div
+                                key={item.id}
+                                onClick={() => handleToggleRemove(cat, item)}
+                                className={`flex items-center justify-between gap-3 p-3 rounded-xl transition-all cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-[#FFF9F6] border border-[#F5C6CB] shadow-xs'
+                                    : 'bg-white border border-gray-100 hover:border-gray-200'
+                                }`}
+                              >
+                                <div>
+                                  <h4 className="text-xs sm:text-sm font-bold text-gray-900 leading-snug">
+                                    Remove {item.name}
+                                  </h4>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleRemove(cat, item);
+                                  }}
+                                  className={`w-7 h-7 flex items-center justify-center flex-shrink-0 rounded-lg transition-all ${
+                                    isSelected
+                                      ? 'bg-[#550B18] text-white shadow-xs'
+                                      : 'bg-gray-100 text-gray-600 hover:bg-[#550B18] hover:text-white'
+                                  }`}
+                                >
+                                  {isSelected ? (
+                                    <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
+                                      <path d="M0 11l2-2 5 5L18 3l2 2L7 18z" />
+                                    </svg>
+                                  ) : (
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                  )}
+                                </button>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="space-y-3 py-1">
+                            <div className="bg-white p-3 rounded-xl border border-dashed border-[#F5C6CB] flex items-center justify-between">
+                              <div>
+                                <span className="text-xs font-bold text-[#550B18] block">Ingin tambah Remove?</span>
+                                <span className="text-[10px] text-gray-400">Pembersihan kuku lama sebelum pengerjaan.</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const removeId = cat.categoryId === 'nailart-tangan' ? 'nat-remove' : 'nak-remove';
+                                  const removeObj = { id: removeId, name: 'Remove' };
+                                  handleToggleRemove(cat, removeObj);
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                  selectedServices.some((s) => s.id === (cat.categoryId === 'nailart-tangan' ? 'nat-remove' : 'nak-remove'))
+                                    ? 'bg-[#550B18] text-white'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-[#F5C6CB]'
+                                }`}
+                              >
+                                {selectedServices.some((s) => s.id === (cat.categoryId === 'nailart-tangan' ? 'nat-remove' : 'nak-remove')) ? '✓ Remove Dipilih' : '+ Pilih Remove'}
+                              </button>
+                            </div>
+
+                            {cat.types.map((typeObj) => {
+                              const isOpenSubDropdown = openTypeState[cat.categoryId] === typeObj.typeId;
+                              const hasSelectedOption = typeObj.options.some((opt) => 
+                                selectedServices.some((s) => s.id === opt.id)
+                              );
+
+                              return (
+                                <div key={typeObj.typeId} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenTypeState(prev => ({
+                                        ...prev,
+                                        [cat.categoryId]: isOpenSubDropdown ? null : typeObj.typeId
+                                      }));
+                                    }}
+                                    className={`w-full p-3 flex items-center justify-between text-left transition-colors ${
+                                      hasSelectedOption ? 'bg-[#FFF9F6] border-l-4 border-l-[#550B18]' : 'hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-black text-gray-800">{typeObj.typeName}</span>
+                                      {hasSelectedOption && (
+                                        <span className="text-[10px] bg-[#550B18] text-white px-2 py-0.5 rounded-full font-bold">
+                                          Dipilih
+                                        </span>
+                                      )}
+                                    </div>
+                                    <svg
+                                      className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${isOpenSubDropdown ? 'rotate-180' : ''}`}
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                  </button>
+
+                                  {isOpenSubDropdown && (
+                                    <div className="p-2 bg-gray-50/80 border-t border-gray-100 grid grid-cols-2 gap-2">
+                                      {typeObj.options.map((optionItem) => {
+                                        const isOptionSelected = selectedServices.some((s) => s.id === optionItem.id);
+
+                                        return (
+                                          <button
+                                            key={optionItem.id}
+                                            type="button"
+                                            onClick={() => handleSelectNailartOption(cat, typeObj, optionItem)}
+                                            className={`p-2.5 rounded-lg text-center font-bold text-xs transition-all border ${
+                                              isOptionSelected
+                                                ? 'bg-[#550B18] text-white border-[#550B18] shadow-xs'
+                                                : 'bg-white text-gray-700 border-gray-200 hover:border-[#550B18]'
+                                            }`}
+                                          >
+                                            {optionItem.name}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 2. PILIH TANGGAL */}
+          <div className="space-y-2">
+            <label className="block text-xs font-extrabold uppercase text-gray-700">
+              2. Pilih Tanggal Kedatangan *
+            </label>
+            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+              {datesList.map((item) => {
+                const isSelected = selectedDate === item.fullDate;
+                return (
                   <button
-                    key={d.value}
+                    key={item.fullDate}
                     type="button"
                     onClick={() => {
-                      setSelectedDate(d.value);
+                      setSelectedDate(item.fullDate);
                       setSelectedTime(null);
                     }}
-                    className={`py-3 px-2 rounded-2xl border text-center font-bold text-xs transition-all ${
-                      selectedDate === d.value
-                        ? 'bg-[#550B18] text-white border-[#550B18] shadow-md'
-                        : 'bg-white text-gray-700 border-gray-200 hover:border-[#F5C6CB]'
+                    className={`flex-shrink-0 flex flex-col items-center justify-center min-w-[64px] h-[72px] rounded-2xl transition-all relative ${
+                      isSelected
+                        ? 'bg-[#550B18] text-white shadow-md scale-105 font-bold'
+                        : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
                     }`}
                   >
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">
-                2. Pilih Jam Operasional (08:00 - 21:00)
-              </label>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                {activeSlots.map((slot, idx) => {
-                  const isSelected = selectedTime === slot.time;
-                  const isUnavailable = slot.status === 'full' || slot.isBlocked;
-
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      disabled={isUnavailable}
-                      onClick={() => handleSelectTime(slot)}
-                      className={`py-2.5 px-2 rounded-2xl border text-center transition-all ${
-                        isUnavailable
-                          ? 'bg-rose-500 text-white border-rose-500 cursor-not-allowed opacity-80'
-                          : isSelected
-                          ? 'bg-[#550B18] text-white border-[#550B18] shadow-md scale-105'
-                          : 'bg-white text-[#550B18] border-[#F5C6CB] hover:border-[#550B18]'
-                      }`}
-                    >
-                      <span className="text-xs font-extrabold block">{slot.time}</span>
-                      <span className="text-[9px] block">
-                        {slot.isBlocked ? (slot.reason ? slot.reason : 'Tutup') : slot.status === 'full' ? 'Penuh' : 'Tersedia'}
+                    {isSelected && (
+                      <span className="text-[9px] uppercase tracking-wider bg-white/20 px-2 rounded-full mb-0.5 font-bold">
+                        {item.monthName}
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
+                    )}
+                    <span className={`text-[11px] font-medium leading-tight ${isSelected ? 'text-white' : 'text-gray-500'}`}>
+                      {item.dayName}
+                    </span>
+                    <span className={`text-lg font-extrabold ${isSelected ? 'text-white' : 'text-gray-900'}`}>
+                      {item.dayNumber}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
+          </div>
 
-            <div>
-              <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">
-                3. Pilih Jenis Perawatan
+          {/* 3. PILIH JAM OPERASIONAL (DENGAN DUAL-SLOT HIGHLIGHT) */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="block text-xs font-extrabold uppercase text-gray-700">
+                3. Pilih Jam Kedatangan (09:00 - 21:00) *
               </label>
-              <div className="space-y-2">
-                {services.map((s) => (
-                  <div
-                    key={s.id}
-                    onClick={() => setSelectedService(s)}
-                    className={`p-3.5 rounded-2xl border cursor-pointer flex justify-between items-center transition-all ${
-                      selectedService.id === s.id
-                        ? 'border-[#550B18] bg-[#FFF9F6] ring-2 ring-[#550B18]/20'
-                        : 'border-gray-200 hover:border-[#F5C6CB]'
+              {needsTwoSlots && (
+                <span className="text-[10px] text-brand-ruby font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                  ⚠️ Membutuhkan 2 Slot Beruntun
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              {activeSlots.map((slot, idx) => {
+                const nextSlotTime = needsTwoSlots ? getNextHourSlot(selectedTime) : null;
+                // Jam utama yang diklik ATAU jam berikutnya yang ikut ter-blok karena 2 treatment
+                const isSelectedPrimary = selectedTime === slot.time;
+                const isSelectedSecondary = needsTwoSlots && selectedTime && nextSlotTime === slot.time;
+                const isSelected = isSelectedPrimary || isSelectedSecondary;
+
+                const isUnavailable = slot.status === 'full' || slot.isBlocked;
+
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    disabled={isUnavailable}
+                    onClick={() => handleSelectTime(slot)}
+                    className={`py-2.5 px-2 rounded-2xl border text-center transition-all ${
+                      isUnavailable
+                        ? 'bg-rose-500 text-white border-rose-500 cursor-not-allowed opacity-80'
+                        : isSelected
+                        ? 'bg-[#550B18] text-white border-[#550B18] shadow-md scale-105'
+                        : 'bg-white text-[#550B18] border-[#F5C6CB] hover:border-[#550B18]'
                     }`}
                   >
-                    <div>
-                      <h4 className="font-extrabold text-sm text-[#550B18]">{s.name}</h4>
-                      <p className="text-xs text-gray-500">Durasi: {s.duration}</p>
-                    </div>
-                    <span className="font-black text-sm text-[#550B18]">
-                      Rp {s.price.toLocaleString('id-ID')}
+                    <span className="text-xs font-extrabold block">{slot.time}</span>
+                    <span className="text-[9px] block font-semibold">
+                      {isSelectedSecondary ? '(Slot 2)' : slot.reason}
                     </span>
-                  </div>
-                ))}
-              </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* RINGKASAN TREATMENT DIPILIH */}
+          <div className="bg-[#FFF9F6] p-4 rounded-2xl border border-[#F5C6CB] space-y-3">
+            <div className="flex justify-between items-center border-b border-[#F5C6CB]/60 pb-2">
+              <h4 className="font-extrabold text-xs text-[#550B18] uppercase tracking-wide flex items-center gap-1.5">
+                <span></span> Treatment yang Dipilih
+              </h4>
+              <span className="text-[10px] font-bold bg-[#550B18] text-white px-2 py-0.5 rounded-full">
+                {selectedServices.length} Item
+              </span>
             </div>
 
+            {selectedServices.length === 0 ? (
+              <p className="text-xs text-rose-500 italic py-1 text-center">
+                Belum ada treatment yang dipilih. Silakan pilih layanan di atas.
+              </p>
+            ) : (
+              <ul className="space-y-1.5 py-1">
+                {selectedServices.map((srv) => (
+                  <li key={srv.id} className="flex justify-between items-center text-xs font-bold text-[#550B18]">
+                    <span className="flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#550B18]"></span>
+                      {srv.fullName}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 4. PEMBAYARAN DP */}
+          <div className="bg-white p-5 rounded-3xl border border-[#F5C6CB] shadow-md space-y-4">
             <div>
               <label className="block text-xs font-extrabold uppercase text-gray-700 mb-2">
-                4. Metode Pembayaran Wajib
+                4. Pembayaran DP
               </label>
-              <div className="p-4 rounded-2xl border border-[#550B18] bg-[#FFF9F6] flex justify-between items-center">
+              <div className="p-3.5 rounded-2xl border border-[#550B18] bg-[#FFF9F6] flex justify-between items-center">
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">📱</span>
                   <div>
                     <h5 className="font-extrabold text-xs text-[#550B18]">QRIS Duitku</h5>
-                    <p className="text-[10px] text-gray-500">GoPay, ShopeePay, BCA, Mandiri, dll.</p>
+                    <p className="text-[10px] text-gray-500">GoPay, ShopeePay, BCA, Mandiri, QRIS All Bank</p>
                   </div>
                 </div>
-                <span className="text-[10px] bg-[#550B18] text-white px-2 py-1 rounded-lg font-bold">
-                  DP Only
+                <span className="text-[10px] bg-[#550B18] text-white px-2.5 py-1 rounded-lg font-bold">
+                  {mainNailartCount > 1 ? `DP ${mainNailartCount} Treatment` : 'DP Wajib'}
                 </span>
               </div>
             </div>
 
-            <div className="border-t border-dashed border-gray-300 pt-4 space-y-2 text-xs">
-              <div className="flex justify-between text-gray-600">
-                <span>Total Harga ({selectedService.name})</span>
-                <span>Rp {selectedService.price.toLocaleString('id-ID')}</span>
+            <div className="border-t border-dashed border-gray-300 pt-3 flex justify-between items-center text-xs">
+              <div>
+                <span className="font-extrabold text-gray-700 block">Total DP Dibayarkan Sekarang</span>
+                {mainNailartCount > 1 && (
+                  <span className="text-[10px] text-gray-500">(Rp 50.000 × {mainNailartCount} Treatment Utama)</span>
+                )}
               </div>
-              <div className="flex justify-between text-[#550B18] font-bold">
-                <span>DP Wajib Dibayarkan Sekarang (QRIS)</span>
-                <span>Rp {DP_AMOUNT.toLocaleString('id-ID')}</span>
-              </div>
-              <div className="flex justify-between text-gray-500">
-                <span>Sisa Pelunasan di Studio</span>
-                <span>Rp {remainingBalance.toLocaleString('id-ID')}</span>
-              </div>
+              <span className="text-base font-black text-[#550B18]">
+                Rp {DP_AMOUNT.toLocaleString('id-ID')}
+              </span>
             </div>
           </div>
 
+          {/* TOMBOL SUBMIT */}
           <div className="flex gap-3">
             <button
               type="button"
               disabled={loading}
               onClick={() => setStep(1)}
-              className="w-1/3 py-4 rounded-2xl border border-gray-300 font-bold text-sm text-gray-700 hover:bg-gray-50 transition-all"
+              className="w-1/3 py-4 rounded-2xl border border-gray-300 font-bold text-xs text-gray-700 hover:bg-gray-50 transition-all"
             >
               Kembali
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="w-2/3 bg-[#550B18] text-white py-4 rounded-2xl font-black text-sm hover:bg-[#3d0711] transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-2/3 bg-[#550B18] text-white py-4 rounded-2xl font-black text-xs sm:text-sm hover:bg-[#3d0711] transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {loading ? (
                 <span>Memproses Duitku...</span>
               ) : (
-                <span>Bayar DP Rp 50.000 via QRIS</span>
+                <span>Bayar DP Rp {DP_AMOUNT.toLocaleString('id-ID')} via QRIS</span>
               )}
             </button>
           </div>
         </form>
       )}
 
+      {/* STEP 3: SUKSES */}
       {step === 3 && (
         <div className="bg-white rounded-3xl border border-[#F5C6CB] shadow-xl overflow-hidden space-y-6">
           <div className="bg-[#550B18] text-white p-6 text-center space-y-2">
@@ -425,15 +920,23 @@ console.log('Duitku Response:', duitkuRes);
                 <span className="font-bold text-[#550B18]">{customerName}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">WA & IG:</span>
-                <span className="font-bold text-[#550B18]">{customerWa} {customerIg ? `| ${customerIg.startsWith('@') ? customerIg : `@${customerIg}`}` : ''}</span>
+                <span className="text-gray-500">Nomor WA:</span>
+                <span className="font-bold text-[#550B18]">{customerWa}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Tanggal & Jam:</span>
-                <span className="font-bold text-[#550B18]">{selectedDate} @ {selectedTime} WIB</span>
+                <span className="font-bold text-[#550B18]">
+                  {selectedDate} @ {needsTwoSlots ? `${selectedTime} & ${getNextHourSlot(selectedTime)} WIB` : `${selectedTime} WIB`}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Tagihan DP:</span>
+                <span className="text-gray-500">Treatment:</span>
+                <span className="font-bold text-[#550B18] text-right">
+                  {selectedServices.map((s) => s.fullName).join(', ')}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">DP Dibayar:</span>
                 <span className="font-black text-[#550B18]">Rp {DP_AMOUNT.toLocaleString('id-ID')}</span>
               </div>
             </div>
@@ -445,8 +948,8 @@ console.log('Duitku Response:', duitkuRes);
                 setStep(1);
                 setCustomerName('');
                 setCustomerWa('');
-                setCustomerIg('');
                 setSelectedTime(null);
+                setSelectedServices([]);
               }}
               className="bg-[#550B18] text-white px-6 py-3 rounded-2xl font-bold text-xs hover:bg-[#3d0711] transition-all"
             >
@@ -455,6 +958,29 @@ console.log('Duitku Response:', duitkuRes);
           </div>
         </div>
       )}
+
+      {/* CUSTOM POPUP MODAL */}
+      {modal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl border border-[#F5C6CB] p-6 max-w-sm w-full shadow-2xl text-center space-y-4 transform transition-all">
+            <div className="w-12 h-12 bg-[#FFF9F6] border border-[#F5C6CB] rounded-full flex items-center justify-center mx-auto text-xl">
+              {modal.type === 'error' ? '⚠️' : modal.type === 'warning' ? '🔔' : 'ℹ️'}
+            </div>
+            <div>
+              <h3 className="font-black text-lg text-[#550B18]">{modal.title}</h3>
+              <p className="text-xs text-gray-600 mt-2 leading-relaxed">{modal.message}</p>
+            </div>
+            <button
+              type="button"
+              onClick={closeModal}
+              className="w-full bg-[#550B18] text-white py-3.5 rounded-2xl font-bold text-xs hover:bg-[#3d0711] transition-all shadow-md active:scale-95"
+            >
+              Oke, Mengerti
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

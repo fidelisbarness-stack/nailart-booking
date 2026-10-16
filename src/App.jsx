@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import Navbar from './components/Navbar';
+import Navbar from './components/Navbar.jsx';
 import Dashboard from './pages/Dashboard';
 import Booking from './pages/Booking';
 import UlasanGaleri from './pages/Ulasan';
@@ -12,6 +12,9 @@ export default function App() {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
+
+  // State Baru: Menyimpan kategori galeri yang dipilih dari Dashboard
+  const [selectedCategory, setSelectedCategory] = useState('Semua');
 
   // Data Booking (Global State)
   const [bookings, setBookings] = useState([
@@ -90,26 +93,26 @@ export default function App() {
       setActivePage('admin');
     } else {
       setPinError('PIN Admin Salah! (Petunjuk: 1234)');
-      setPinInput(''); // Reset input saat salah
+      setPinInput('');
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#FFF9F6] font-sans flex flex-col text-[#550B18]">
+    <div className="min-h-screen w-full bg-[#FFF9F6] font-sans flex flex-col text-[#550B18] overflow-x-hidden antialiased">
       {/* Banner Admin Active */}
       {isAdmin && (
-        <div className="bg-[#550B18] text-[#FFF9F6] text-center text-xs py-2 px-4 font-bold flex items-center justify-center gap-2 sticky top-0 z-50 shadow-md">
+        <div className="bg-[#550B18] text-[#FFF9F6] text-center text-[11px] sm:text-xs py-2 px-3 sm:px-4 font-bold flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 sticky top-0 z-50 shadow-md">
           <span>👑 MODE ADMIN / OWNER AKTIF</span>
-          <span className="text-[#F5C6CB]">•</span>
+          <span className="text-[#F5C6CB] hidden min-[360px]:inline">•</span>
           <button 
             onClick={() => setActivePage('admin')}
-            className="bg-white text-[#550B18] hover:bg-gray-200 px-2.5 py-0.5 rounded-full text-[10px] uppercase font-extrabold transition-colors"
+            className="bg-white text-[#550B18] hover:bg-gray-200 px-2.5 py-0.5 rounded-full text-[10px] uppercase font-extrabold transition-colors shadow-sm"
           >
             Panel Admin
           </button>
           <button 
             onClick={handleLogoutAdmin}
-            className="bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-0.5 rounded-full text-[10px] uppercase font-extrabold transition-colors"
+            className="bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-0.5 rounded-full text-[10px] uppercase font-extrabold transition-colors shadow-sm"
           >
             Keluar Mode
           </button>
@@ -124,9 +127,14 @@ export default function App() {
         onOpenAdminModal={handleOpenAdminModal}
       />
 
-      {/* Routing Halaman */}
-      <main className="flex-1">
-        {activePage === 'dashboard' && <Dashboard setActivePage={setActivePage} />}
+      {/* Routing Halaman Utama */}
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+        {activePage === 'dashboard' && (
+          <Dashboard 
+            setActivePage={setActivePage} 
+            setSelectedCategory={setSelectedCategory} 
+          />
+        )}
         {activePage === 'booking' && (
           <Booking 
             bookings={bookings} 
@@ -135,7 +143,13 @@ export default function App() {
             setGlobalSlots={setGlobalSlots}
           />
         )}
-        {activePage === 'reviews' && <UlasanGaleri isAdmin={isAdmin} />}
+        {activePage === 'reviews' && (
+          <UlasanGaleri 
+            isAdmin={isAdmin} 
+            selectedCategory={selectedCategory} 
+            setSelectedCategory={setSelectedCategory} 
+          />
+        )}
         {activePage === 'about' && <AboutUs />}
         {activePage === 'admin' && isAdmin && (
           <Admin 
@@ -147,23 +161,23 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="bg-[#550B18] text-[#FFF9F6] py-8 text-center text-sm mt-12">
+      {/* Footer Responsive */}
+      <footer className="bg-[#550B18] text-[#FFF9F6] py-6 sm:py-8 px-4 text-center text-xs sm:text-sm mt-8 sm:mt-12 w-full">
         <p className="font-semibold">© 2026 Nail Art Studio. All Rights Reserved.</p>
-        <p className="text-xs text-[#F5C6CB] mt-1">Presisi & Kecantikan di Setiap Sentuhan Jemari Anda.</p>
+        <p className="text-[11px] sm:text-xs text-[#F5C6CB] mt-1">Presisi & Kecantikan di Setiap Sentuhan Jemari Anda.</p>
       </footer>
 
       {/* Modal Autentikasi Admin */}
       {showAdminModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-[#F5C6CB]">
-            <h3 className="text-xl font-black text-[#550B18] mb-2">Masuk Mode Admin</h3>
+          <div className="bg-white rounded-3xl p-5 sm:p-6 w-full max-w-xs sm:max-w-md shadow-2xl border border-[#F5C6CB] animate-fadeIn">
+            <h3 className="text-lg sm:text-xl font-black text-[#550B18] mb-1">Masuk Mode Admin</h3>
             <p className="text-xs text-gray-600 mb-4">Masukkan 4 Digit PIN Keamanan Admin.</p>
             
             <form onSubmit={handleVerifyPin} className="space-y-4">
               <input 
                 type="password" 
-                maxLength="4"
+                maxLength={4}
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
                 placeholder="****"
@@ -177,13 +191,13 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleCloseAdminModal}
-                  className="flex-1 py-3 rounded-2xl border border-gray-300 text-gray-700 font-bold hover:bg-gray-100 transition-all text-sm"
+                  className="flex-1 py-3 rounded-2xl border border-gray-300 text-gray-700 font-bold hover:bg-gray-100 transition-all text-xs sm:text-sm"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 rounded-2xl bg-[#550B18] text-white font-bold hover:bg-[#3d0711] transition-all text-sm"
+                  className="flex-1 py-3 rounded-2xl bg-[#550B18] text-white font-bold hover:bg-[#3d0711] transition-all text-xs sm:text-sm shadow-md"
                 >
                   Verifikasi
                 </button>
