@@ -7,6 +7,7 @@ import {
   deleteDoc, 
   doc, 
   setDoc,
+  updateDoc,
   query, 
   orderBy, 
   serverTimestamp 
@@ -282,6 +283,23 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
       triggerAlert('Slot Dibuka', `Jam ${time} kembali dibuka untuk reservasi.`, 'success');
     } catch (error) {
       triggerAlert('Gagal Membuka Slot', error.message, 'danger');
+    }
+  };
+
+  const handleCompleteBooking = async (booking) => {
+    if (!booking?.id) {
+      triggerAlert('Gagal Menyelesaikan Pesanan', 'ID booking tidak ditemukan.', 'danger');
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        orderStatus: 'Selesai',
+        completedAt: serverTimestamp(),
+      });
+      triggerAlert('Pesanan Selesai', `Pesanan ${booking.customerName || 'pelanggan'} berhasil ditandai selesai.`, 'success');
+    } catch (error) {
+      triggerAlert('Gagal Menyelesaikan Pesanan', error.message, 'danger');
     }
   };
 
@@ -604,6 +622,7 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
                 {currentSlots.map((slot) => {
                   const isClientBooked = Boolean(slot.clientBooking);
+                  const isOrderCompleted = slot.clientBooking?.orderStatus === 'Selesai';
                   const clientName = slot.clientBooking?.customerName || slot.clientBooking?.name || slot.clientBooking?.clientName;
                   const serviceName = slot.clientBooking?.serviceName || slot.clientBooking?.service || slot.clientBooking?.treatment;
 
@@ -625,7 +644,9 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
                         
                         {/* Status Label */}
                         <div className="text-[10px] font-semibold mt-1 space-y-0.5">
-                          {slot.isPast ? (
+                          {isClientBooked && isOrderCompleted ? (
+                            <span className="text-emerald-700 font-bold block">✅ Pesanan Selesai</span>
+                          ) : slot.isPast ? (
                             <span className="text-gray-500 font-bold block">⏱️ Lewat</span>
                           ) : slot.isBlocked ? (
                             <span className="text-brand-ruby font-bold block truncate" title={slot.reason}>
@@ -648,7 +669,28 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
 
                       {/* Action Button */}
                       <div>
-                        {slot.isPast ? (
+                        {isClientBooked ? (
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={() => setActiveAdminTab('history')}
+                              className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[9px] font-bold shadow-sm transition-colors"
+                            >
+                              Detail WA
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isOrderCompleted}
+                              onClick={() => handleCompleteBooking(slot.clientBooking)}
+                              className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold shadow-sm transition-colors ${
+                                isOrderCompleted
+                                  ? 'bg-emerald-100 text-emerald-800 cursor-default'
+                                  : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                              }`}
+                            >
+                              {isOrderCompleted ? '✓ Selesai' : 'Selesai'}
+                            </button>
+                          </div>
+                        ) : slot.isPast ? (
                           <button
                             disabled
                             className="w-full py-1.5 bg-gray-200 text-gray-500 rounded-lg text-[10px] font-bold cursor-not-allowed"
@@ -661,13 +703,6 @@ export default function Admin({ globalSlots, setGlobalSlots }) {
                             className="w-full py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-bold shadow-sm transition-colors"
                           >
                             Buka
-                          </button>
-                        ) : isClientBooked ? (
-                          <button
-                            onClick={() => setActiveAdminTab('history')}
-                            className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold shadow-sm transition-colors"
-                          >
-                            Detail WA
                           </button>
                         ) : (
                           <button
