@@ -37,13 +37,24 @@ export default function Navbar({ activePage, setActivePage, isAdmin, onOpenAdmin
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [currentDate, setCurrentDate] = useState(() => getJakartaDateString(new Date()));
-  const [isOpenStudio, setIsOpenStudio] = useState(true);
+  const [currentMinuteOfDay, setCurrentMinuteOfDay] = useState(0);
+  const [isScheduleOpen, setIsScheduleOpen] = useState(true);
+  const isWithinOperatingHours = currentMinuteOfDay >= 9 * 60 && currentMinuteOfDay < 21 * 60;
+  const isOpenStudio = isScheduleOpen && isWithinOperatingHours;
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      const options = { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
-      setCurrentTime(new Date().toLocaleTimeString('id-ID', options));
+      const jakartaTimeParts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Jakarta',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(now);
+      const timeParts = Object.fromEntries(jakartaTimeParts.map(({ type, value }) => [type, value]));
+      setCurrentTime(`${timeParts.hour}:${timeParts.minute}:${timeParts.second}`);
+      setCurrentMinuteOfDay(Number(timeParts.hour) * 60 + Number(timeParts.minute));
       setCurrentDate(getJakartaDateString(now));
     };
     updateTime();
@@ -54,7 +65,7 @@ export default function Navbar({ activePage, setActivePage, isAdmin, onOpenAdmin
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'schedules', currentDate), (snapshot) => {
       if (!snapshot.exists()) {
-        setIsOpenStudio(true);
+        setIsScheduleOpen(true);
         return;
       }
 
@@ -64,7 +75,7 @@ export default function Navbar({ activePage, setActivePage, isAdmin, onOpenAdmin
         return;
       }
 
-      setIsOpenStudio(slots.length === 0 || slots.some((slot) => !slot.isBlocked));
+      setIsScheduleOpen(slots.length === 0 || slots.some((slot) => !slot.isBlocked));
     }, (error) => {
       console.error('Error fetching studio schedule:', error);
     });
