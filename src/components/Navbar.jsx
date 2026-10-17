@@ -1,6 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 // Perbaikan 1: Gunakan path relative '../assets/'
 import logoImg from '../assets/logoImg.jpeg'; 
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+
+const getJakartaDateString = (date) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const dateParts = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+};
 
 // Sub-komponen Indikator Jam dan Status Studio
 function StudioStatus({ isOpenStudio, currentTime }) {
@@ -20,20 +33,44 @@ function StudioStatus({ isOpenStudio, currentTime }) {
   );
 }
 
-export default function Navbar({ activePage, setActivePage, isAdmin, onOpenAdminModal, isOpenStudio = false }) {
+export default function Navbar({ activePage, setActivePage, isAdmin, onOpenAdminModal }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
+  const [currentDate, setCurrentDate] = useState(() => getJakartaDateString(new Date()));
+  const [isOpenStudio, setIsOpenStudio] = useState(true);
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
       const options = { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
       setCurrentTime(new Date().toLocaleTimeString('id-ID', options));
+      setCurrentDate(getJakartaDateString(now));
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'schedules', currentDate), (snapshot) => {
+      if (!snapshot.exists()) {
+        setIsOpenStudio(true);
+        return;
+      }
+
+      const slots = snapshot.data().slots;
+      if (!Array.isArray(slots)) {
+        console.error(`Invalid schedule slots for ${currentDate}`);
+        return;
+      }
+
+      setIsOpenStudio(slots.length === 0 || slots.some((slot) => !slot.isBlocked));
+    }, (error) => {
+      console.error('Error fetching studio schedule:', error);
+    });
+
+    return () => unsubscribe();
+  }, [currentDate]);
 
   const navLinks = [
     { name: 'Beranda', id: 'dashboard' },
