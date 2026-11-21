@@ -101,6 +101,46 @@ export default function AboutUs() {
               <span>📸</span> Follow Instagram
             </a>
           </div>
+
+          {/* KONTAK SUPPORT */}
+          <div className="pt-4 border-t border-brand-rose/40 max-w-xl mx-auto">
+            <p className="text-[11px] font-bold text-brand-dark/70 uppercase tracking-wider mb-3">
+              Kontak Support
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-left">
+              <a
+                href="mailto:fitrohlivia@gmail.com"
+                className="flex items-start gap-2 p-3 rounded-xl bg-brand-creamy/30 border border-brand-rose/40 hover:border-brand-ruby transition-colors"
+              >
+                <span>✉️</span>
+                <span>
+                  <span className="block text-[10px] font-bold text-brand-dark/60 uppercase">Email</span>
+                  <span className="font-bold text-brand-dark break-all">fitrohlivia@gmail.com</span>
+                </span>
+              </a>
+
+              <a
+                href="tel:+6287827562925"
+                className="flex items-start gap-2 p-3 rounded-xl bg-brand-creamy/30 border border-brand-rose/40 hover:border-brand-ruby transition-colors"
+              >
+                <span>📞</span>
+                <span>
+                  <span className="block text-[10px] font-bold text-brand-dark/60 uppercase">Nomor Telepon</span>
+                  <span className="font-bold text-brand-dark">087827562925</span>
+                </span>
+              </a>
+
+              <div className="sm:col-span-2 flex items-start gap-2 p-3 rounded-xl bg-brand-creamy/30 border border-brand-rose/40 text-left">
+                <span>📍</span>
+                <span>
+                  <span className="block text-[10px] font-bold text-brand-dark/60 uppercase">Alamat</span>
+                  <span className="font-bold text-brand-dark leading-relaxed">
+                    Jl. Duren Soka, Dusun I, Madegondo, Kec. Grogol, Kabupaten Sukoharjo, Jawa Tengah 57552
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* JAM OPERASIONAL & LOKASI STUDIO */}
