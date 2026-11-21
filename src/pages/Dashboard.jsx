@@ -1,5 +1,7 @@
 import React from 'react';
 import nailTanganImg from '../assets/NailTangan.jpeg';
+import nailKakiImg from '../assets/NailKaki.jpeg';
+import removeImg from '../assets/remove.jpeg';
 
 export default function Dashboard({ setActivePage, setSelectedCategory }) {
   const handleCategoryClick = (categoryName) => {
@@ -43,42 +45,71 @@ export default function Dashboard({ setActivePage, setSelectedCategory }) {
           </div>
         </div>
 
-        {/* ELEGANT CENTERED CARD (UKURAN SEDANG YANG PAS & PROPORSIONAL) */}
-        <div className="flex justify-center">
-          <button 
-            onClick={() => handleCategoryClick('Nailart Tangan')}
-            className="group text-left bg-white rounded-3xl border border-brand-rose/40 overflow-hidden shadow-md hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 focus:outline-none flex flex-col justify-between w-full max-w-md"
-          >
-            {/* Image Section */}
-            <div className="relative h-60 w-full overflow-hidden bg-brand-rose/20">
-              <img
-                src={nailTanganImg}
-                alt="Nailart Tangan"
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-              
-              {/* Icon & Label */}
-              <span className="absolute top-4 left-4 bg-white/90 backdrop-blur-md text-brand-dark px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-sm flex items-center gap-2">
-                <span>💅</span>
-                <span>Galeri & Katalog</span>
-              </span>
+        {/* CARD LAYANAN */}
+        <section className="space-y-5">
+          <div className="text-center">
+            <span className="text-[11px] font-bold tracking-[0.2em] text-brand-ruby uppercase">
+              Layanan Pilihan
+            </span>
+            <h2 className="mt-2 text-2xl sm:text-3xl font-extrabold text-brand-dark">
+              Pilih Layanan Nail Art
+            </h2>
+          </div>
 
-              {/* Hover Text */}
-              <span className="absolute bottom-4 right-4 text-white text-xs font-bold bg-brand-dark/80 px-3 py-1.5 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shadow-md">
-                Buka Katalog <span className="text-brand-rose">→</span>
-              </span>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {[
+              {
+                name: 'Nail Art Tangan',
+                category: 'Nailart Tangan',
+                image: nailTanganImg,
+              },
+              {
+                name: 'Nail Art Kaki',
+                category: 'Nailart Kaki',
+                image: nailKakiImg,
+              },
+              {
+                name: 'Removing',
+                category: 'Remove',
+                image: removeImg,
+              },
+            ].map((service) => (
+              <button
+                key={service.category}
+                type="button"
+                onClick={() => handleCategoryClick(service.category)}
+                className="group text-left bg-white rounded-3xl border border-brand-rose/40 overflow-hidden shadow-md hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 focus:outline-none"
+              >
+                <div className="relative h-56 w-full overflow-hidden bg-brand-rose/20">
+                  <img
+                    src={service.image}
+                    alt={service.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                  <span className="absolute bottom-4 right-4 text-white text-xs font-bold bg-brand-dark/80 px-3 py-1.5 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity">
+                    Lihat Galeri →
+                  </span>
+                </div>
 
-            {/* Text Section */}
-            <div className="p-6 space-y-2">
-              <h3 className="font-bold text-brand-dark text-lg group-hover:text-brand-ruby transition-colors">
-                Galeri & Katalog
-              </h3>
-
-            </div>
-          </button>
-        </div>
+                <div className="p-5 flex items-end justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-brand-ruby">
+                      Layanan
+                    </span>
+                    <h3 className="mt-1 font-bold text-brand-dark text-base group-hover:text-brand-ruby transition-colors">
+                      {service.name}
+                    </h3>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[10px] text-brand-dark/60">Mulai dari</p>
+                    <p className="font-extrabold text-brand-ruby">Rp 50.000</p>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
 
       </div>
     </div>
